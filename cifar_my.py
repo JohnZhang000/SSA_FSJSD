@@ -145,7 +145,7 @@ parser.add_argument(
 parser.add_argument(
     '--num-workers',
     type=int,
-    default=4,
+    default=16,
     help='Number of pre-fetching threads.')
 
 args = parser.parse_args()
@@ -225,44 +225,44 @@ def train(net, train_loader, optimizer, scheduler):
   for i, (images, targets) in enumerate(train_loader):
     optimizer.zero_grad()
 
-    # # images = images.cuda()
-    # targets = targets.cuda()
-    # # logits = net(images)
-    # logits_clean,features_clean=get_preds_and_features(net,images[0].cuda())
-    # logits_aug1,features_aug1=get_preds_and_features(net,images[1].cuda())
-    # logits_aug2,features_aug2=get_preds_and_features(net,images[2].cuda())
+    # images = images.cuda()
+    targets = targets.cuda()
+    # logits = net(images)
+    logits_clean,features_clean=get_preds_and_features(net,images[0].cuda())
+    logits_aug1,features_aug1=get_preds_and_features(net,images[1].cuda())
+    logits_aug2,features_aug2=get_preds_and_features(net,images[2].cuda())
 
-    # # loss = F.cross_entropy(logits, targets)
-    # logits_all=[logits_clean, logits_aug1, logits_aug2]
-    # features_all=[features_clean,features_aug1,features_aug2]
-    # loss_pred,loss_jsd,loss_feature = my_loss(logits_all,features_all,targets)
-    # loss=loss_pred+loss_jsd#+loss_feature*0.01#+
+    # loss = F.cross_entropy(logits, targets)
+    logits_all=[logits_clean, logits_aug1, logits_aug2]
+    features_all=[features_clean,features_aug1,features_aug2]
+    loss_pred,loss_jsd,loss_feature = my_loss(logits_all,features_all,targets)
+    loss=loss_pred+loss_jsd+loss_feature#+
 
-    if args.no_jsd:
-      images = images.cuda()
-      targets = targets.cuda()
-      logits = net(images)
-      loss = F.cross_entropy(logits, targets)
-    else:
-      images_all = torch.cat(images, 0).cuda()
-      targets = targets.cuda()
-      logits_all = net(images_all)
-      logits_clean, logits_aug1, logits_aug2 = torch.split(
-          logits_all, images[0].size(0))
+    # if args.no_jsd:
+    #   images = images.cuda()
+    #   targets = targets.cuda()
+    #   logits = net(images)
+    #   loss = F.cross_entropy(logits, targets)
+    # else:
+    #   images_all = torch.cat(images, 0).cuda()
+    #   targets = targets.cuda()
+    #   logits_all = net(images_all)
+    #   logits_clean, logits_aug1, logits_aug2 = torch.split(
+    #       logits_all, images[0].size(0))
 
-      # Cross-entropy is only computed on clean images
-      loss = F.cross_entropy(logits_clean, targets)
+    #   # Cross-entropy is only computed on clean images
+    #   loss = F.cross_entropy(logits_clean, targets)
 
-      p_clean, p_aug1, p_aug2 = F.softmax(
-          logits_clean, dim=1), F.softmax(
-              logits_aug1, dim=1), F.softmax(
-                  logits_aug2, dim=1)
+    #   p_clean, p_aug1, p_aug2 = F.softmax(
+    #       logits_clean, dim=1), F.softmax(
+    #           logits_aug1, dim=1), F.softmax(
+    #               logits_aug2, dim=1)
 
-      # Clamp mixture distribution to avoid exploding KL divergence
-      p_mixture = torch.clamp((p_clean + p_aug1 + p_aug2) / 3., 1e-7, 1).log()
-      loss += 12 * (F.kl_div(p_mixture, p_clean, reduction='batchmean') +
-                    F.kl_div(p_mixture, p_aug1, reduction='batchmean') +
-                    F.kl_div(p_mixture, p_aug2, reduction='batchmean')) / 3.
+    #   # Clamp mixture distribution to avoid exploding KL divergence
+    #   p_mixture = torch.clamp((p_clean + p_aug1 + p_aug2) / 3., 1e-7, 1).log()
+    #   loss += 12 * (F.kl_div(p_mixture, p_clean, reduction='batchmean') +
+    #                 F.kl_div(p_mixture, p_aug1, reduction='batchmean') +
+    #                 F.kl_div(p_mixture, p_aug2, reduction='batchmean')) / 3.
 
     loss.backward()
     lr=optimizer.param_groups[0]['lr']
@@ -274,14 +274,14 @@ def train(net, train_loader, optimizer, scheduler):
       writer.add_scalar('Lr',lr,epoch*len(train_loader)+i)
       writer.add_scalar('Loss/Train Loss',loss_ema,epoch*len(train_loader)+i)
       writer.add_scalar('Loss/Loss_sum',loss,epoch*len(train_loader)+i)
-      # writer.add_scalar('Loss/Loss_pred',loss_pred,epoch*len(train_loader)+i)
-      # writer.add_scalar('Loss/Loss_jsd',loss_jsd,epoch*len(train_loader)+i)
-      # writer.add_scalar('Loss/Loss_feature',loss_feature,epoch*len(train_loader)+i)
+      writer.add_scalar('Loss/Loss_pred',loss_pred,epoch*len(train_loader)+i)
+      writer.add_scalar('Loss/Loss_jsd',loss_jsd,epoch*len(train_loader)+i)
+      writer.add_scalar('Loss/Loss_feature',loss_feature,epoch*len(train_loader)+i)
 
-      # for tag, value in net.named_parameters():
-      #   tag = tag.replace('.', '/')
-      #   writer.add_histogram(tag, value.data.cpu().numpy(), epoch*len(train_loader)+i)
-      #   writer.add_histogram(tag+'/grad', value.grad.data.cpu().numpy(), epoch*len(train_loader)+i)
+      for tag, value in net.named_parameters():
+        tag = tag.replace('.', '/')
+        writer.add_histogram(tag, value.data.cpu().numpy(), epoch*len(train_loader)+i)
+        writer.add_histogram(tag+'/grad', value.grad.data.cpu().numpy(), epoch*len(train_loader)+i)
 
 
 
@@ -307,73 +307,73 @@ def test(net, test_loader):
       test_loader.dataset)
 
 
-# def test_my(net, test_loader):
-#   """Evaluate network on given dataset."""
-#   net.eval()
-#   total_loss = 0.
-#   total_correct1 = 0
-#   total_correct5 = 0
-#   with torch.no_grad():
-#     for images, targets in test_loader:
-#       images, targets = images.cuda(), targets.cuda()
-#       logits = net(images)
-#       loss = F.cross_entropy(logits, targets)
-#       acc1, acc5 = accuracy(logits, targets, topk=(1, 5))
-#       total_correct1 += float(acc1.detach().cpu().numpy())*targets.size(0)
-#       total_correct5 += float(acc5.detach().cpu().numpy())*targets.size(0)
+def test_my(net, test_loader):
+  """Evaluate network on given dataset."""
+  net.eval()
+  total_loss = 0.
+  total_correct1 = 0
+  total_correct5 = 0
+  with torch.no_grad():
+    for images, targets in test_loader:
+      images, targets = images.cuda(), targets.cuda()
+      logits = net(images)
+      loss = F.cross_entropy(logits, targets)
+      acc1, acc5 = accuracy(logits, targets, topk=(1, 5))
+      total_correct1 += float(acc1.detach().cpu().numpy())*targets.size(0)
+      total_correct5 += float(acc5.detach().cpu().numpy())*targets.size(0)
 
-#   return total_correct1/len(test_loader.dataset), total_correct5/len(test_loader.dataset)
+  return total_correct1/len(test_loader.dataset), total_correct5/len(test_loader.dataset)
 
 
-# def accuracy(output, target, topk=(1,)):
-#     """Computes the accuracy over the k top predictions for the specified values of k"""
-#     with torch.no_grad():
-#         maxk = max(topk)
-#         batch_size = target.size(0)
+def accuracy(output, target, topk=(1,)):
+    """Computes the accuracy over the k top predictions for the specified values of k"""
+    with torch.no_grad():
+        maxk = max(topk)
+        batch_size = target.size(0)
 
-#         _, pred = output.topk(maxk, 1, True, True)
-#         pred = pred.t()
-#         correct = pred.eq(target.view(1, -1).expand_as(pred))
+        _, pred = output.topk(maxk, 1, True, True)
+        pred = pred.t()
+        correct = pred.eq(target.view(1, -1).expand_as(pred))
 
-#         res = []
-#         for k in topk:
-#             correct_k = correct[:k].reshape(-1).float().sum(0, keepdim=True)
-#             res.append(correct_k.mul_(100.0 / batch_size))
-#         return res
+        res = []
+        for k in topk:
+            correct_k = correct[:k].reshape(-1).float().sum(0, keepdim=True)
+            res.append(correct_k.mul_(100.0 / batch_size))
+        return res
 
 def test_c(net, test_data, base_path):
   """Evaluate network on given corrupted dataset."""
-  corruption_accs = []
-  # corruption_acc1s = []
-  # corruption_acc5s = []
+  # corruption_accs = []
+  corruption_acc1s = []
+  corruption_acc5s = []
   for corruption in CORRUPTIONS:
     # Reference to original data is mutated
     test_data.data = np.load(base_path + corruption + '.npy')
     test_data.targets = torch.LongTensor(np.load(base_path + 'labels.npy'))
 
-    test_loader = torch.utils.data.DataLoader(
+    test_loader_c = torch.utils.data.DataLoader(
         test_data,
         batch_size=args.eval_batch_size,
         shuffle=False,
         num_workers=args.num_workers,
         pin_memory=True)
 
-    test_loss, test_acc = test(net, test_loader)
-    corruption_accs.append(test_acc)
-    print('{}\n\tTest Loss {:.3f} | Test Error {:.3f}'.format(
-    corruption, test_loss, 100 - 100. * test_acc))
-    # acc1, acc5 = test_my(net, test_loader)
-    # corruption_acc1s.append(acc1)
-    # corruption_acc5s.append(acc5)
-    # writer.add_scalar('corruption/'+corruption+'_acc1', acc1,epoch)
-    # writer.add_scalar('corruption/'+corruption+'_acc5', acc5,epoch)
-  #   logger.info('{} * Acc@1 {:.3f} Acc@5 {:.3f}'.format(corruption, acc1, acc5))
-  # logger.info('Corruption 15* Acc@1 {:.3f} Acc@5 {:.3f}'.format(np.mean(corruption_acc1s[4:]), np.mean(corruption_acc5s[4:])))
+    # test_loss, test_acc = test(net, test_loader)
+    # corruption_accs.append(test_acc)
+    # print('{}\n\tTest Loss {:.3f} | Test Error {:.3f}'.format(
+    # corruption, test_loss, 100 - 100. * test_acc))
+    acc1, acc5 = test_my(net, test_loader_c)
+    corruption_acc1s.append(acc1)
+    corruption_acc5s.append(acc5)
+    writer.add_scalar('corruption/'+corruption+'_acc1', acc1,epoch)
+    writer.add_scalar('corruption/'+corruption+'_acc5', acc5,epoch)
+    logger.info('{} * Acc@1 {:.3f} Acc@5 {:.3f}'.format(corruption, acc1, acc5))
+  logger.info('Corruption 15* Acc@1 {:.3f} Acc@5 {:.3f}'.format(np.mean(corruption_acc1s[4:]), np.mean(corruption_acc5s[4:])))
 
 
-  # return np.mean(corruption_acc1s),np.mean(corruption_acc5s)
-  print('15* Mean Corruption Error@1 {:.3f}'.format(100-100*np.mean(corruption_accs[4:])))
-  return np.mean(corruption_accs)
+  return np.mean(corruption_acc1s),np.mean(corruption_acc5s)
+  # print('15* Mean Corruption Error@1 {:.3f}'.format(100-100*np.mean(corruption_accs[4:])))
+  # return np.mean(corruption_accs)
 
 
 def main():
@@ -546,24 +546,27 @@ def main():
         ' Test Error {4:.2f}'
         .format((epoch + 1), int(time.time() - begin_time), train_loss_ema,
                 test_loss, 100 - 100. * test_acc))
+    # 此处有bug，不能打开
     # if epoch%args.eval_crpt==0:
     #   mce1, mce5 = test_c(net, test_data, base_c_path)
     #   writer.add_scalar('Total/Test_C Acc', mce1,epoch)
     #   logger.info('C_Acc1: {:.3f}, C_Acc5: {:.3f}'.format(mce1, mce5))
 
-  # mce1, mce5 = test_c(net, test_data, base_c_path)
-  # logger.info('C_Acc1: {:.3f}, C_Acc5: {:.3f}'.format(mce1, mce5))
-
-  test_c_acc = test_c(net, test_data, base_c_path)
-  print('Mean Corruption Error: {:.3f}'.format(100 - 100. * test_c_acc))
+  mce1, mce5 = test_c(net, test_data, base_c_path)
+  logger.info('C_Acc1: {:.3f}, C_Acc5: {:.3f}'.format(mce1, mce5))
 
   with open(log_path, 'a') as f:
-      f.write('%03d,%05d,%0.6f,%0.5f,%0.2f\n' %
-              (args.epochs + 1, 0, 0, 0, 100 - 100 * test_c_acc))
+    f.write('%03d,%05d,%0.6f,%0.5f,%0.2f\n' %
+            (args.epochs + 1, 0, 0, 0, 100 - mce1))
+
+  # test_c_acc = test_c(net, test_data, base_c_path)
+  # print('Mean Corruption Error: {:.3f}'.format(100 - 100. * test_c_acc))
 
   # with open(log_path, 'a') as f:
-  #   f.write('%03d,%05d,%0.6f,%0.5f,%0.2f\n' %
-  #           (args.epochs + 1, 0, 0, 0, 100 - mce1))
+  #     f.write('%03d,%05d,%0.6f,%0.5f,%0.2f\n' %
+  #             (args.epochs + 1, 0, 0, 0, 100 - 100 * test_c_acc))
+
+
 
 def get_preds_and_features(model,images):
     features_tmp = {}
@@ -582,16 +585,6 @@ def get_preds_and_features(model,images):
     for handle in handles:
       handle.remove() ## hook删除 
 
-    # keys=list(features_tmp.keys())
-    # features=[]
-    # features_num=len(handles)
-    # # device_num=int(len(features_tmp)/features_num)
-    # for i in range(features_num):
-    #   tmp=[]
-    #   for key in keys:
-    #     # print('key:{}, feature:{},shape:{}'.format(key,i,features_tmp[key][i].shape))
-    #     tmp.append(features_tmp[key][i].cpu())
-    #   features.append(torch.vstack(tmp))
     features=features_tmp
     return preds,features
 
@@ -626,8 +619,9 @@ def my_loss(logits_all,features_all,targets):
         loss_tmp+=F.cosine_similarity(features_clean[key][i].flatten(),features_aug1[key][i].flatten(),axis=0)
         loss_tmp+=F.cosine_similarity(features_clean[key][i].flatten(),features_aug2[key][i].flatten(),axis=0)
         loss_feature+=loss_tmp.cpu()
-      # loss_feature+=torch.norm(features_clean[i]-features_aug1[i])
-      # loss_feature+=torch.norm(features_clean[i]-features_aug2[i])
+        # loss_tmp+=torch.norm(features_clean[key][i]-features_aug1[key][i])
+        # loss_tmp+=torch.norm(features_clean[key][i]-features_aug2[key][i])
+        # loss_feature+=loss_tmp.cpu()
     loss_feature=1-loss_feature/feature_num/len(device_keys)/2
 
     loss_feature=loss_feature.cuda()
