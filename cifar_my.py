@@ -207,14 +207,12 @@ class AugMixDataset(torch.utils.data.Dataset):
 
   def __getitem__(self, i):
     x, y = self.dataset[i]
-    # if self.no_jsd:
-    #   return aug(x, self.preprocess), y
-    # else:
-      # im_tuple = (self.preprocess(x), aug(x, self.preprocess),
-      #             aug(x, self.preprocess))
-      # return im_tuple, y
-    im_tuple = (self.preprocess(x), aug(x, self.preprocess), aug(x, self.preprocess))
-    return im_tuple, y
+    if self.no_jsd:
+      return aug(x, self.preprocess), y
+    else:
+      im_tuple = (self.preprocess(x), aug(x, self.preprocess),
+                  aug(x, self.preprocess))
+      return im_tuple, y
 
   def __len__(self):
     return len(self.dataset)
@@ -280,10 +278,10 @@ def train(net, train_loader, optimizer, scheduler):
       # writer.add_scalar('Loss/Loss_jsd',loss_jsd,epoch*len(train_loader)+i)
       # writer.add_scalar('Loss/Loss_feature',loss_feature,epoch*len(train_loader)+i)
 
-      for tag, value in net.named_parameters():
-        tag = tag.replace('.', '/')
-        writer.add_histogram(tag, value.data.cpu().numpy(), epoch*len(train_loader)+i)
-        writer.add_histogram(tag+'/grad', value.grad.data.cpu().numpy(), epoch*len(train_loader)+i)
+      # for tag, value in net.named_parameters():
+      #   tag = tag.replace('.', '/')
+      #   writer.add_histogram(tag, value.data.cpu().numpy(), epoch*len(train_loader)+i)
+      #   writer.add_histogram(tag+'/grad', value.grad.data.cpu().numpy(), epoch*len(train_loader)+i)
 
 
 
@@ -309,44 +307,45 @@ def test(net, test_loader):
       test_loader.dataset)
 
 
-def test_my(net, test_loader):
-  """Evaluate network on given dataset."""
-  net.eval()
-  total_loss = 0.
-  total_correct1 = 0
-  total_correct5 = 0
-  with torch.no_grad():
-    for images, targets in test_loader:
-      images, targets = images.cuda(), targets.cuda()
-      logits = net(images)
-      loss = F.cross_entropy(logits, targets)
-      acc1, acc5 = accuracy(logits, targets, topk=(1, 5))
-      total_correct1 += float(acc1.detach().cpu().numpy())*targets.size(0)
-      total_correct5 += float(acc5.detach().cpu().numpy())*targets.size(0)
+# def test_my(net, test_loader):
+#   """Evaluate network on given dataset."""
+#   net.eval()
+#   total_loss = 0.
+#   total_correct1 = 0
+#   total_correct5 = 0
+#   with torch.no_grad():
+#     for images, targets in test_loader:
+#       images, targets = images.cuda(), targets.cuda()
+#       logits = net(images)
+#       loss = F.cross_entropy(logits, targets)
+#       acc1, acc5 = accuracy(logits, targets, topk=(1, 5))
+#       total_correct1 += float(acc1.detach().cpu().numpy())*targets.size(0)
+#       total_correct5 += float(acc5.detach().cpu().numpy())*targets.size(0)
 
-  return total_correct1/len(test_loader.dataset), total_correct5/len(test_loader.dataset)
+#   return total_correct1/len(test_loader.dataset), total_correct5/len(test_loader.dataset)
 
 
-def accuracy(output, target, topk=(1,)):
-    """Computes the accuracy over the k top predictions for the specified values of k"""
-    with torch.no_grad():
-        maxk = max(topk)
-        batch_size = target.size(0)
+# def accuracy(output, target, topk=(1,)):
+#     """Computes the accuracy over the k top predictions for the specified values of k"""
+#     with torch.no_grad():
+#         maxk = max(topk)
+#         batch_size = target.size(0)
 
-        _, pred = output.topk(maxk, 1, True, True)
-        pred = pred.t()
-        correct = pred.eq(target.view(1, -1).expand_as(pred))
+#         _, pred = output.topk(maxk, 1, True, True)
+#         pred = pred.t()
+#         correct = pred.eq(target.view(1, -1).expand_as(pred))
 
-        res = []
-        for k in topk:
-            correct_k = correct[:k].reshape(-1).float().sum(0, keepdim=True)
-            res.append(correct_k.mul_(100.0 / batch_size))
-        return res
+#         res = []
+#         for k in topk:
+#             correct_k = correct[:k].reshape(-1).float().sum(0, keepdim=True)
+#             res.append(correct_k.mul_(100.0 / batch_size))
+#         return res
 
 def test_c(net, test_data, base_path):
   """Evaluate network on given corrupted dataset."""
-  corruption_acc1s = []
-  corruption_acc5s = []
+  corruption_accs = []
+  # corruption_acc1s = []
+  # corruption_acc5s = []
   for corruption in CORRUPTIONS:
     # Reference to original data is mutated
     test_data.data = np.load(base_path + corruption + '.npy')
@@ -359,21 +358,27 @@ def test_c(net, test_data, base_path):
         num_workers=args.num_workers,
         pin_memory=True)
 
-    acc1, acc5 = test_my(net, test_loader)
-    corruption_acc1s.append(acc1)
-    corruption_acc5s.append(acc5)
-    writer.add_scalar('corruption/'+corruption+'_acc1', acc1,epoch)
-    writer.add_scalar('corruption/'+corruption+'_acc5', acc5,epoch)
-    logger.info('{} * Acc@1 {:.3f} Acc@5 {:.3f}'.format(corruption, acc1, acc5))
-  logger.info('Corruption 15* Acc@1 {:.3f} Acc@5 {:.3f}'.format(np.mean(corruption_acc1s[4:]), np.mean(corruption_acc5s[4:])))
+    test_loss, test_acc = test(net, test_loader)
+    corruption_accs.append(test_acc)
+    print('{}\n\tTest Loss {:.3f} | Test Error {:.3f}'.format(
+    corruption, test_loss, 100 - 100. * test_acc))
+    # acc1, acc5 = test_my(net, test_loader)
+    # corruption_acc1s.append(acc1)
+    # corruption_acc5s.append(acc5)
+    # writer.add_scalar('corruption/'+corruption+'_acc1', acc1,epoch)
+    # writer.add_scalar('corruption/'+corruption+'_acc5', acc5,epoch)
+  #   logger.info('{} * Acc@1 {:.3f} Acc@5 {:.3f}'.format(corruption, acc1, acc5))
+  # logger.info('Corruption 15* Acc@1 {:.3f} Acc@5 {:.3f}'.format(np.mean(corruption_acc1s[4:]), np.mean(corruption_acc5s[4:])))
 
 
-  return np.mean(corruption_acc1s),np.mean(corruption_acc5s)
+  # return np.mean(corruption_acc1s),np.mean(corruption_acc5s)
+  print('15* Mean Corruption Error@1 {:.3f}'.format(100-100*np.mean(corruption_accs[4:])))
+  return np.mean(corruption_accs)
 
 
 def main():
-  # torch.manual_seed(1)
-  # np.random.seed(1)
+  torch.manual_seed(1)
+  np.random.seed(1)
 
   # Load datasets
   train_transform = transforms.Compose(
@@ -451,21 +456,28 @@ def main():
       # optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
       logger.info('Model restored from {}'.format(args.resume))
 
-      mce1, mce5 = test_c(net, test_data, base_c_path)
-      writer.add_scalar('corruption/corruption_mean_acc1', mce1,0)
-      writer.add_scalar('corruption/corruption_mean_acc5', mce5,0)
-      logger.info('Corruption mean * Acc@1 {:.3f} Acc@5 {:.3f}'.format(mce1, mce5))
+      # mce1, mce5 = test_c(net, test_data, base_c_path)
+      # writer.add_scalar('corruption/corruption_mean_acc1', mce1,0)
+      # writer.add_scalar('corruption/corruption_mean_acc5', mce5,0)
+      # logger.info('Corruption mean * Acc@1 {:.3f} Acc@5 {:.3f}'.format(mce1, mce5))
 
   if args.evaluate:
     # Evaluate clean accuracy first because test_c mutates underlying data
-    acc1, acc5 = test_my(net, test_loader)
-    logger.info('Clean * Acc@1 {:.3f} Acc@5 {:.3f}'.format(acc1, acc5))
+    test_loss, test_acc = test(net, test_loader)
+    print('Clean\n\tTest Loss {:.3f} | Test Error {:.2f}'.format(
+        test_loss, 100 - 100. * test_acc))
 
-    mce1, mce5 = test_c(net, test_data, base_c_path)
-    writer.add_scalar('corruption/corruption_mean_acc1', acc1)
-    writer.add_scalar('corruption/corruption_mean_acc5', mce5)
+    test_c_acc = test_c(net, test_data, base_c_path)
+    print('Mean Corruption Error: {:.3f}'.format(100 - 100. * test_c_acc))
 
-    logger.info('Corruption mean * Acc@1 {:.3f} Acc@5 {:.3f}'.format(mce1, mce5))
+    # acc1, acc5 = test_my(net, test_loader)
+    # logger.info('Clean * Acc@1 {:.3f} Acc@5 {:.3f}'.format(acc1, acc5))
+
+    # mce1, mce5 = test_c(net, test_data, base_c_path)
+    # writer.add_scalar('corruption/corruption_mean_acc1', acc1)
+    # writer.add_scalar('corruption/corruption_mean_acc5', mce5)
+
+    # logger.info('Corruption mean * Acc@1 {:.3f} Acc@5 {:.3f}'.format(mce1, mce5))
     return
 
   scheduler = torch.optim.lr_scheduler.LambdaLR(
@@ -531,20 +543,27 @@ def main():
 
     logger.info(
         'Epoch {0:3d} | Time {1:5d} | Train Loss {2:.4f} | Test Loss {3:.3f} |'
-        ' Test Acc {4:.2f}'
+        ' Test Error {4:.2f}'
         .format((epoch + 1), int(time.time() - begin_time), train_loss_ema,
-                test_loss, 100*test_acc))
-    if epoch%args.eval_crpt==0:
-      mce1, mce5 = test_c(net, test_data, base_c_path)
-      writer.add_scalar('Total/Test_C Acc', mce1,epoch)
-      logger.info('C_Acc1: {:.3f}, C_Acc5: {:.3f}'.format(mce1, mce5))
+                test_loss, 100 - 100. * test_acc))
+    # if epoch%args.eval_crpt==0:
+    #   mce1, mce5 = test_c(net, test_data, base_c_path)
+    #   writer.add_scalar('Total/Test_C Acc', mce1,epoch)
+    #   logger.info('C_Acc1: {:.3f}, C_Acc5: {:.3f}'.format(mce1, mce5))
 
-  mce1, mce5 = test_c(net, test_data, base_c_path)
-  logger.info('C_Acc1: {:.3f}, C_Acc5: {:.3f}'.format(mce1, mce5))
+  # mce1, mce5 = test_c(net, test_data, base_c_path)
+  # logger.info('C_Acc1: {:.3f}, C_Acc5: {:.3f}'.format(mce1, mce5))
+
+  test_c_acc = test_c(net, test_data, base_c_path)
+  print('Mean Corruption Error: {:.3f}'.format(100 - 100. * test_c_acc))
 
   with open(log_path, 'a') as f:
-    f.write('%03d,%05d,%0.6f,%0.5f,%0.2f\n' %
-            (args.epochs + 1, 0, 0, 0, 100 - mce1))
+      f.write('%03d,%05d,%0.6f,%0.5f,%0.2f\n' %
+              (args.epochs + 1, 0, 0, 0, 100 - 100 * test_c_acc))
+
+  # with open(log_path, 'a') as f:
+  #   f.write('%03d,%05d,%0.6f,%0.5f,%0.2f\n' %
+  #           (args.epochs + 1, 0, 0, 0, 100 - mce1))
 
 def get_preds_and_features(model,images):
     features_tmp = {}
@@ -639,7 +658,7 @@ if __name__ == '__main__':
 
   logger.addHandler(ch)
   logger.addHandler(fh)
-  g.setup_seed(0)
+  # g.setup_seed(0)
 
   writer = SummaryWriter(saved_dir)
 
