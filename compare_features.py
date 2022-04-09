@@ -11,6 +11,7 @@ from torch.utils.data import DataLoader
 from skimage.feature import hog
 from sklearn.metrics.pairwise import cosine_similarity
 from augment_and_mix import augment_and_mix
+from scipy.io import savemat
 
 def get_vec_sim(arrays1,arrays2):
     assert(2==len(arrays1.shape))
@@ -53,19 +54,25 @@ def compare_spectrum(dataset_setting_clean,dataset_setting_crupt,file_names,save
     images_clean=get_spectrum(images_clean)
 
     # 计算损坏图像的频谱差
+    my_mat={}
     for i,dataset_dir in enumerate(dataset_setting_crupt.dataset_dir):
         images_crupt=np.zeros_like(images_clean)
-        saved_dir_tmp='_'.join(dataset_dir.split('/')[-3:])
-        saved_dir_tmp=os.path.join(saved_dir,saved_dir_tmp)
-        for i,file_name in enumerate(file_names):
+        crupt_name='_'.join(dataset_dir.split('/')[-3:])
+        saved_dir_tmp=os.path.join(saved_dir,crupt_name)
+        for j,file_name in enumerate(file_names):
             image_tmp=Image.open(os.path.join(dataset_dir,file_name)).resize([image_shape[1],image_shape[2]])
             image_tmp=image_tmp.convert('RGB')
             image_tmp=np.array(image_tmp).transpose(2,0,1)
-            images_crupt[i,...]=image_tmp/255.0
+            images_crupt[j,...]=image_tmp/255.0
         images_crupt=get_spectrum(images_crupt)
         images_diff=images_crupt-images_clean
         images_diff=np.mean(images_diff,axis=0)
         g.save_images_channel(saved_dir_tmp,images_diff)
+
+        for k in range(images_diff.shape[0]):
+            my_mat[crupt_name+'_c'+str(k)]=images_diff[k,...]
+    savemat(os.path.join(saved_dir,'corruptions.mat'),my_mat)
+    
 
 def compare_features(compare_type,dataset_setting_clean,dataset_setting_crupt,file_names,saved_dir):
     # 计算干净图像的频谱
@@ -90,11 +97,11 @@ def compare_features(compare_type,dataset_setting_clean,dataset_setting_crupt,fi
         saved_dir_tmp=os.path.join(saved_dir,crupt_name)
         if not os.path.exists(saved_dir_tmp):
             os.makedirs(saved_dir_tmp)
-        for i,file_name in enumerate(file_names):
+        for j,file_name in enumerate(file_names):
             image_tmp=Image.open(os.path.join(dataset_dir,file_name)).resize([image_shape[1],image_shape[2]])
             image_tmp=image_tmp.convert('RGB')
             image_tmp=np.array(image_tmp).transpose(2,0,1)
-            images_crupt[i,...]=image_tmp/255.0
+            images_crupt[j,...]=image_tmp/255.0
         if 'spectrum'==compare_type:
             features_crupt=get_spectrum(images_crupt)
             # 保存对比结果
@@ -150,13 +157,13 @@ def compare_features_cnn(model,dataset_setting_clean,dataset_setting_crupt,file_
         # saved_dir_tmp=os.path.join(saved_dir,crupt_name)
         if not os.path.exists(saved_dir):
             os.makedirs(saved_dir)
-        for i,file_name in enumerate(file_names):
+        for j,file_name in enumerate(file_names):
             image_tmp=Image.open(os.path.join(dataset_dir,file_name)).resize([image_shape[1],image_shape[2]])
             image_tmp=image_tmp.convert('RGB')
             image_tmp=np.array(image_tmp,dtype=np.float32)
             image_tmp=image_tmp/255.0
             image_tmp=(image_tmp-dataset_setting_crupt.mean)/dataset_setting_crupt.std
-            images_crupt[i,...]=image_tmp.transpose(2,0,1)
+            images_crupt[j,...]=image_tmp.transpose(2,0,1)
         features_crupt=get_features_cnn(model,images_crupt,dataset_setting_crupt.batch_size)
         sims=get_vec_sim(features_crupt,features_clean)
         np.savetxt(os.path.join(saved_dir,crupt_name+'_cnn_resnet.txt'),sims)
@@ -176,10 +183,10 @@ def compare_features_augmix(dataset_setting_clean,severity,width,depth,alpha,fil
     logger.info('Finish {}'.format('cleans'))
 
     images_crupt=np.zeros_like(images_clean)
-    for i in tqdm(range(images_clean.shape[0])):
-        image_tmp=images_clean[i,...].transpose(1,2,0)
+    for j in tqdm(range(images_clean.shape[0])):
+        image_tmp=images_clean[j,...].transpose(1,2,0)
         image_tmp=augment_and_mix(image_tmp,severity,width,depth,alpha)
-        images_crupt[i,...]=image_tmp.transpose(2,0,1)
+        images_crupt[j,...]=image_tmp.transpose(2,0,1)
     features_crupt=get_hog(images_crupt)
     setting_name='s'+str(severity)+'_w'+str(width)+'_d'+str(depth)+'_a'+str(alpha)
     logger.info('Finish {}'.format(setting_name))
@@ -216,7 +223,7 @@ def output_names(dir_src):
 '''
 设置
 '''
-model_name='resnet50_imagenet_augmix'
+model_name='resnet50_imagenet'
 num_images=1000
 os.environ['CUDA_VISIBLE_DEVICES']='2'
 
@@ -258,6 +265,7 @@ else:
     dataset_name='cifar-10'
 
 ckpt  = './models/'+model_name+'.pth.tar'
+# ckpt  = './results/2022-04-04-23_20_35/checkpoint.pth.tar'
 model=g.select_model(model_name, ckpt)
 data_setting_clean=g.dataset_setting(dataset_name)
 data_setting_crupt=g.dataset_setting(dataset_name+'-c')
@@ -269,14 +277,14 @@ images_selected=images_all[:num_images]
 '''
 输出频谱
 '''
-# compare_spectrum(data_setting_clean,data_setting_crupt,images_selected,saved_dir)
+compare_spectrum(data_setting_clean,data_setting_crupt,images_selected,saved_dir)
 # compare_features('hog',data_setting_clean,data_setting_crupt,images_selected,saved_dir)
 # compare_features_cnn(model,data_setting_clean,data_setting_crupt,images_selected,saved_dir)
-severitys=[3]
-widths=[3]
-depths=[-1]
-for severity in severitys:
-    for width in widths:
-        for depth in depths:
-            compare_features_augmix(data_setting_clean,severity,width,depth,1,images_selected,saved_dir)
+# severitys=[3]
+# widths=[3]
+# depths=[-1]
+# for severity in severitys:
+#     for width in widths:
+#         for depth in depths:
+#             compare_features_augmix(data_setting_clean,severity,width,depth,1,images_selected,saved_dir)
 

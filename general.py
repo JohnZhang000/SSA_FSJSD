@@ -112,7 +112,44 @@ class dataset_setting():
             self.std=np.array((0.5,0.5,0.5),dtype=np.float32)
             self.nb_classes=10
             self.input_shape=(3,32,32)   
-            self.batch_size=256       
+            self.batch_size=256      
+
+    #     elif 'cifar-10-c'==dataset_name:
+    #         if select_corruption_type is None:
+    #             self.corruption_types=['defocus_blur', 'glass_blur', 'motion_blur', 'zoom_blur',
+    #                 'contrast', 'elastic_transform', 'jpeg_compression', 'pixelate',
+    #                 'gaussian_noise', 'impulse_noise',  'shot_noise', 
+    #                 'brightness', 'fog', 'frost','snow',
+    #                 'gaussian_blur', 'saturate', 'spatter', 'speckle_noise']
+    #         else:
+    #             self.corruption_types=select_corruption_type
+
+    #         if select_corruption_level is None:
+    #             self.corruption_levels=range(5)
+    #         else:
+    #             self.corruption_levels=select_corruption_level
+
+    #         self.dataset_dir=[]
+    #         dataset_dirs_tmp=[os.path.join(self.root_dataset_dir,'ImageNet-C-100',x) for x in self.corruption_types]
+    #         for dataset_dir_tmp in dataset_dirs_tmp:
+    #             self.dataset_dir+=[os.path.join(dataset_dir_tmp,str(x+1)) for x in self.corruption_levels]
+    #         self.mean=np.array((0.485, 0.456, 0.406),dtype=np.float32)
+    #         self.std=np.array((0.229, 0.224, 0.225),dtype=np.float32)
+    #         self.nb_classes=1000
+    #         self.input_shape=(3,224,224)
+    #         self.batch_size=256 
+
+    #       for corruption in CORRUPTIONS:
+    # # Reference to original data is mutated
+    # test_data.data = np.load(base_path + corruption + '.npy')
+    # test_data.targets = torch.LongTensor(np.load(base_path + 'labels.npy'))
+
+    # test_loader_c = torch.utils.data.DataLoader(
+    #     test_data,
+    #     batch_size=args.eval_batch_size,
+    #     shuffle=False,
+    #     num_workers=args.num_workers,
+    #     pin_memory=True)
             
         elif 'imagenet'==dataset_name:
             self.dataset_dir=os.path.join(self.root_dataset_dir,'ILSVRC2012-100')

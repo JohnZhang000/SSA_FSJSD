@@ -27,6 +27,7 @@ import os
 from sched import scheduler
 import shutil
 import time
+from PIL import Image
 
 import augmentations
 from models.allconv import AllConvNet
@@ -43,6 +44,7 @@ from torchvision import datasets
 from torchvision import transforms
 import logging
 import general as g
+import albumentations
 from torch.utils.tensorboard import SummaryWriter
 
 now = time.strftime("%Y-%m-%d-%H_%M_%S",time.localtime(time.time())) 
@@ -128,7 +130,7 @@ parser.add_argument(
     '--resume',
     '-r',
     type=str,
-    default='',#'./snapshots/allconv_checkpoint.pth.tar',
+    default='./snapshots/allconv_checkpoint.pth.tar',#'./results/2022-04-04-23_34_11/checkpoint.pth.tar',#
     help='Checkpoint path for resume / test.')
 parser.add_argument('--evaluate', action='store_true', help='Eval only.')
 parser.add_argument(
@@ -163,6 +165,23 @@ def get_lr(step, total_steps, lr_max, lr_min):
   """Compute learning rate according to cosine annealing schedule."""
   return lr_min + (lr_max - lr_min) * 0.5 * (1 +
                                              np.cos(step / total_steps * np.pi))
+
+def webpf(img):
+    img=np.array(img)
+    quality=np.random.randint(20,100)
+    assert(img.shape[0]==img.shape[1])  
+    # assert(img.max()>1)
+    webp_aug = albumentations.Compose([
+        albumentations.ImageCompression(quality_lower=quality,quality_upper=quality,compression_type=0,p=1),
+        # albumentations.HorizontalFlip(p=0.5)
+        ])
+    
+    augmented = webp_aug(image=img)
+    auged = augmented['image']/255.0
+    auged = torch.from_numpy(auged).permute(2,0,1).float()
+    # img = Image.fromarray(img.astype('uint8')).convert('RGB')
+    return auged
+
 
 
 def aug(image, preprocess):
@@ -236,7 +255,7 @@ def train(net, train_loader, optimizer, scheduler):
     logits_all=[logits_clean, logits_aug1, logits_aug2]
     features_all=[features_clean,features_aug1,features_aug2]
     loss_pred,loss_jsd,loss_feature = my_loss(logits_all,features_all,targets)
-    loss=loss_pred+loss_jsd+loss_feature#+
+    loss=loss_pred+loss_jsd+loss_feature*10
 
     # if args.no_jsd:
     #   images = images.cuda()
@@ -463,21 +482,21 @@ def main():
 
   if args.evaluate:
     # Evaluate clean accuracy first because test_c mutates underlying data
-    test_loss, test_acc = test(net, test_loader)
-    print('Clean\n\tTest Loss {:.3f} | Test Error {:.2f}'.format(
-        test_loss, 100 - 100. * test_acc))
+    # test_loss, test_acc = test(net, test_loader)
+    # print('Clean\n\tTest Loss {:.3f} | Test Error {:.2f}'.format(
+    #     test_loss, 100 - 100. * test_acc))
 
-    test_c_acc = test_c(net, test_data, base_c_path)
-    print('Mean Corruption Error: {:.3f}'.format(100 - 100. * test_c_acc))
+    # test_c_acc = test_c(net, test_data, base_c_path)
+    # print('Mean Corruption Error: {:.3f}'.format(100 - 100. * test_c_acc))
 
     # acc1, acc5 = test_my(net, test_loader)
     # logger.info('Clean * Acc@1 {:.3f} Acc@5 {:.3f}'.format(acc1, acc5))
 
-    # mce1, mce5 = test_c(net, test_data, base_c_path)
+    mce1, mce5 = test_c(net, test_data, base_c_path)
     # writer.add_scalar('corruption/corruption_mean_acc1', acc1)
     # writer.add_scalar('corruption/corruption_mean_acc5', mce5)
 
-    # logger.info('Corruption mean * Acc@1 {:.3f} Acc@5 {:.3f}'.format(mce1, mce5))
+    logger.info('Corruption mean * Acc@1 {:.3f} Acc@5 {:.3f}'.format(mce1, mce5))
     return
 
   scheduler = torch.optim.lr_scheduler.LambdaLR(
@@ -588,6 +607,13 @@ def get_preds_and_features(model,images):
     features=features_tmp
     return preds,features
 
+def get_corr(fake_Y, Y):#计算两个向量person相关系数
+    fake_Y, Y = fake_Y.reshape(-1), Y.reshape(-1)
+    fake_Y_mean, Y_mean = torch.mean(fake_Y), torch.mean(Y)
+    corr = (torch.sum((fake_Y - fake_Y_mean) * (Y - Y_mean))) / (
+                torch.sqrt(torch.sum((fake_Y - fake_Y_mean) ** 2)) * torch.sqrt(torch.sum((Y - Y_mean) ** 2)))
+    return corr
+
 def my_loss(logits_all,features_all,targets):
     logits_clean=logits_all[0]
     logits_aug1=logits_all[1]
@@ -595,6 +621,9 @@ def my_loss(logits_all,features_all,targets):
     
     # loss for pred
     loss_pred = F.cross_entropy(logits_clean, targets)
+    # loss_pred += F.cross_entropy(logits_aug1, targets)
+    # loss_pred += F.cross_entropy(logits_aug2, targets)
+    # loss_pred = loss_pred/3.
 
     # loss for jsd
     p_clean, p_aug1, p_aug2 = F.softmax(
@@ -613,16 +642,20 @@ def my_loss(logits_all,features_all,targets):
     features_aug2=features_all[2]
     device_keys=list(features_clean.keys())
     feature_num=len(features_clean[device_keys[0]])
+    samples_num=features_clean[device_keys[0]][0].shape[0]
     for i in range(feature_num):
       for key in device_keys:
         loss_tmp=0.
-        loss_tmp+=F.cosine_similarity(features_clean[key][i].flatten(),features_aug1[key][i].flatten(),axis=0)
-        loss_tmp+=F.cosine_similarity(features_clean[key][i].flatten(),features_aug2[key][i].flatten(),axis=0)
+        for j in range(samples_num):
+          loss_tmp+=get_corr(features_clean[key][i][j,...].flatten(),features_aug1[key][i][j,...].flatten())
+          loss_tmp+=get_corr(features_clean[key][i][j,...].flatten(),features_aug2[key][i][j,...].flatten())
+          # loss_tmp+=F.cosine_similarity(features_clean[key][i][j,...].flatten(),features_aug1[key][i][j,...].flatten(),axis=0)
+          # loss_tmp+=F.cosine_similarity(features_clean[key][i][j,...].flatten(),features_aug2[key][i][j,...].flatten(),axis=0)
         loss_feature+=loss_tmp.cpu()
         # loss_tmp+=torch.norm(features_clean[key][i]-features_aug1[key][i])
         # loss_tmp+=torch.norm(features_clean[key][i]-features_aug2[key][i])
         # loss_feature+=loss_tmp.cpu()
-    loss_feature=1-loss_feature/feature_num/len(device_keys)/2
+    loss_feature=1-loss_feature/feature_num/samples_num/len(device_keys)/2
 
     loss_feature=loss_feature.cuda()
 
