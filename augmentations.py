@@ -16,6 +16,7 @@
 
 import numpy as np
 from PIL import Image, ImageOps, ImageEnhance
+import cv2
 
 # ImageNet code should change this value
 IMAGE_SIZE = 32
@@ -140,6 +141,64 @@ def sharpness(pil_img, level):
 def AddSaltPepperNoise(pil_img, level):
 
     img = np.array(pil_img)                                                             # 图片转numpy
+    h, w, c = img.shape
+    Nd = np.random.random()#*level
+    Sd = 1 - Nd
+    mask = np.random.choice((0, 1, 2), size=(h, w, 1), p=[Nd/2.0, Nd/2.0, Sd])      # 生成一个通道的mask
+    mask = np.repeat(mask, c, axis=2)                                               # 在通道的维度复制，生成彩色的mask
+    img[mask == 0] = 0                                                              # 椒
+    img[mask == 1] = 255                                                            # 盐
+    img = Image.fromarray(img.astype('uint8')).convert('RGB')                        # numpy转图片
+    return img
+
+from scipy.fftpack import dct,idct
+
+noise_Y=np.loadtxt('0.txt')
+noise_Cb=np.loadtxt('1.txt')
+noise_Cr=np.loadtxt('1.txt')
+
+noise_Y = cv2.resize(noise_Y, dsize=(IMAGE_SIZE, IMAGE_SIZE), interpolation=cv2.INTER_CUBIC)
+noise_Cb = cv2.resize(noise_Cb, dsize=(IMAGE_SIZE, IMAGE_SIZE), interpolation=cv2.INTER_CUBIC)
+noise_Cr = cv2.resize(noise_Cr, dsize=(IMAGE_SIZE, IMAGE_SIZE), interpolation=cv2.INTER_CUBIC)
+
+def dct2 (block):
+    return dct(dct(block.T, norm = 'ortho').T, norm = 'ortho')
+
+def idct2(block):
+    return idct(idct(block.T, norm = 'ortho').T, norm = 'ortho')
+
+def img2dct(clean_imgs):
+    clean_imgs=clean_imgs.convert('YCbCr')
+    clean_imgs=np.array(clean_imgs).transpose(2,0,1)
+    
+    block_dct=np.zeros_like(clean_imgs)
+    sign_dct=np.zeros_like(clean_imgs)
+    for j in range(clean_imgs.shape[0]):
+        ch_block_cln=clean_imgs[j,:,:]                   
+        ch_block_cln=dct2(ch_block_cln)
+        sign_dct[j,:,:]=np.sign(ch_block_cln)
+        block_cln_tmp = np.log(1+np.abs(ch_block_cln))
+        block_dct[j,:,:]=block_cln_tmp
+    block_dct=block_dct
+    return block_dct,sign_dct
+
+def dct2img(dct_imgs,sign_dct):
+    block_cln=np.zeros_like(dct_imgs)
+    for j in range(dct_imgs.shape[0]):
+        ch_block_cln=clean_imgs[j,:,:]
+        ch_block_cln=np.power(10,ch_block_cln)-1
+        ch_block_cln=ch_block_cln*sign_dct[j,:,:]
+        ch_block_cln=idct(ch_block_cln)
+        block_cln[j,:,:]=ch_block_cln
+    block_cln=block_cln.transpose(1,2,0)
+    clean_imgs=Image.fromarray(np.uint8(block_cln*255),mode='YCbCr')
+    clean_imgs=clean_imgs.convert('RGB')   
+    return clean_imgs
+
+def AddImpulseNoise(pil_img, level):
+    img = np.array(pil_img)                                                             # 图片转numpy
+    img = np.expand_dims(img,axis=0)
+    img = g.ge
     h, w, c = img.shape
     Nd = np.random.random()#*level
     Sd = 1 - Nd
