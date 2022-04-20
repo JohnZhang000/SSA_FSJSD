@@ -22,6 +22,7 @@ Example usage:
 """
 from __future__ import print_function
 
+import misc
 import argparse
 import os
 from sched import scheduler
@@ -30,6 +31,7 @@ import time
 from PIL import Image
 
 import augmentations
+# from augmentations import my_noise
 from models.allconv import AllConvNet
 import numpy as np
 from models.third_party.ResNeXt_DenseNet.models.densenet import densenet
@@ -45,6 +47,9 @@ from torchvision import transforms
 import logging
 import general as g
 import albumentations
+from pytorch_metric_learning.losses import NTXentLoss
+from pytorch_metric_learning.utils import distributed as pml_dist
+
 from torch.utils.tensorboard import SummaryWriter
 
 now = time.strftime("%Y-%m-%d-%H_%M_%S",time.localtime(time.time())) 
@@ -78,7 +83,7 @@ parser.add_argument(
     default=0.1,
     help='Initial learning rate.')
 parser.add_argument(
-    '--batch-size', '-b', type=int, default=128, help='Batch size.')
+    '--batch-size', '-b', type=int, default=64, help='Batch size.')
 parser.add_argument('--eval-batch-size', type=int, default=1000)
 parser.add_argument('--momentum', type=float, default=0.9, help='Momentum.')
 parser.add_argument(
@@ -130,7 +135,7 @@ parser.add_argument(
     '--resume',
     '-r',
     type=str,
-    default='./snapshots/allconv_checkpoint.pth.tar',#'./results/2022-04-04-23_34_11/checkpoint.pth.tar',#
+    default='',# ./snapshots/allconv_checkpoint.pth.tar #'./results/2022-04-04-23_34_11/checkpoint.pth.tar',#
     help='Checkpoint path for resume / test.')
 parser.add_argument('--evaluate', action='store_true', help='Eval only.')
 parser.add_argument(
@@ -150,6 +155,15 @@ parser.add_argument(
     default=16,
     help='Number of pre-fetching threads.')
 
+# distributed training parameters
+parser.add_argument('--world_size', default=1, type=int,
+                    help='number of distributed processes')
+parser.add_argument('--local_rank', default=-1, type=int)
+parser.add_argument('--dist_on_itp', action='store_true')
+parser.add_argument('--dist_url', default='env://',
+                    help='url used to set up distributed training')
+
+
 args = parser.parse_args()
 
 CORRUPTIONS = [
@@ -166,21 +180,21 @@ def get_lr(step, total_steps, lr_max, lr_min):
   return lr_min + (lr_max - lr_min) * 0.5 * (1 +
                                              np.cos(step / total_steps * np.pi))
 
-def webpf(img):
-    img=np.array(img)
-    quality=np.random.randint(20,100)
-    assert(img.shape[0]==img.shape[1])  
-    # assert(img.max()>1)
-    webp_aug = albumentations.Compose([
-        albumentations.ImageCompression(quality_lower=quality,quality_upper=quality,compression_type=0,p=1),
-        # albumentations.HorizontalFlip(p=0.5)
-        ])
+# def webpf(img):
+#     img=np.array(img)
+#     quality=np.random.randint(20,100)
+#     assert(img.shape[0]==img.shape[1])  
+#     # assert(img.max()>1)
+#     webp_aug = albumentations.Compose([
+#         albumentations.ImageCompression(quality_lower=quality,quality_upper=quality,compression_type=0,p=1),
+#         # albumentations.HorizontalFlip(p=0.5)
+#         ])
     
-    augmented = webp_aug(image=img)
-    auged = augmented['image']/255.0
-    auged = torch.from_numpy(auged).permute(2,0,1).float()
-    # img = Image.fromarray(img.astype('uint8')).convert('RGB')
-    return auged
+#     augmented = webp_aug(image=img)
+#     auged = augmented['image']/255.0
+#     auged = torch.from_numpy(auged).permute(2,0,1).float()
+#     # img = Image.fromarray(img.astype('uint8')).convert('RGB')
+#     return auged
 
 
 
@@ -236,6 +250,31 @@ class AugMixDataset(torch.utils.data.Dataset):
   def __len__(self):
     return len(self.dataset)
 
+class My_AugMixDataset(torch.utils.data.Dataset):
+  """Dataset wrapper to perform AugMix augmentation."""
+
+  def __init__(self, dataset, preprocess, no_jsd=False):
+    self.dataset = dataset
+    self.preprocess = preprocess
+    self.no_jsd = no_jsd
+    self.len=self.__len__()
+
+  def __getitem__(self, i):
+    x, y = self.dataset[i]
+    if self.no_jsd:
+      return aug(x, self.preprocess), y
+    else:
+      x_neg, y_neg = self.dataset[np.random.randint(0,self.len)]
+      while(y_neg==y):
+        x_neg, y_neg = self.dataset[np.random.randint(0,self.len)]
+      im_tuple = (self.preprocess(x), aug(x, self.preprocess),
+                  self.preprocess(x_neg))
+      y_tuple=(y,y,y_neg)
+      return im_tuple, y_tuple
+
+  def __len__(self):
+    return len(self.dataset)
+
 
 def train(net, train_loader, optimizer, scheduler):
   """Train for one epoch."""
@@ -245,7 +284,9 @@ def train(net, train_loader, optimizer, scheduler):
     optimizer.zero_grad()
 
     # images = images.cuda()
-    targets = targets.cuda()
+    targets_pos = targets[0].cuda()
+    targets_aug = targets[1].cuda()
+    targets_neg = targets[2].cuda()
     # logits = net(images)
     logits_clean,features_clean=get_preds_and_features(net,images[0].cuda())
     logits_aug1,features_aug1=get_preds_and_features(net,images[1].cuda())
@@ -254,8 +295,9 @@ def train(net, train_loader, optimizer, scheduler):
     # loss = F.cross_entropy(logits, targets)
     logits_all=[logits_clean, logits_aug1, logits_aug2]
     features_all=[features_clean,features_aug1,features_aug2]
-    loss_pred,loss_jsd,loss_feature = my_loss(logits_all,features_all,targets)
-    loss=loss_pred+loss_jsd+loss_feature*10
+    targets_all=[targets_pos,targets_aug,targets_neg]
+    loss_pred,loss_jsd,loss_feature = my_loss(logits_all,features_all,targets_all)
+    loss=loss_pred+loss_jsd+loss_feature
 
     # if args.no_jsd:
     #   images = images.cuda()
@@ -375,7 +417,7 @@ def test_c(net, test_data, base_path):
         batch_size=args.eval_batch_size,
         shuffle=False,
         num_workers=args.num_workers,
-        pin_memory=True)
+        pin_memory=False)
 
     # test_loss, test_acc = test(net, test_loader)
     # corruption_accs.append(test_acc)
@@ -396,6 +438,7 @@ def test_c(net, test_data, base_path):
 
 
 def main():
+  # misc.init_distributed_mode(args)
   torch.manual_seed(1)
   np.random.seed(1)
 
@@ -410,10 +453,10 @@ def main():
 
   if args.dataset == 'cifar10':
     train_data = datasets.CIFAR10(
-        '/home/zhangzhuang/Datasets/Cifar-10', train=True, transform=train_transform, download=True)
+        '/media/ubuntu204/F/Dataset/cifar-10', train=True, transform=train_transform, download=True)
     test_data = datasets.CIFAR10(
-        '/home/zhangzhuang/Datasets/Cifar-10', train=False, transform=test_transform, download=True)
-    base_c_path = '/home/zhangzhuang/Datasets/Cifar-10-C/'
+        '/media/ubuntu204/F/Dataset/cifar-10', train=False, transform=test_transform, download=True)
+    base_c_path = '/media/ubuntu204/F/Dataset/cifar-10-c/'
     num_classes = 10
   else:
     train_data = datasets.CIFAR100(
@@ -423,20 +466,33 @@ def main():
     base_c_path = './data/cifar/CIFAR-100-C/'
     num_classes = 100
 
-  train_data = AugMixDataset(train_data, preprocess, args.no_jsd)
+  train_data = My_AugMixDataset(train_data, preprocess, args.no_jsd)
+
+  # if True:  # args.distributed:
+  #     num_tasks = misc.get_world_size()
+  #     global_rank = misc.get_rank()
+  #     sampler_train = torch.utils.data.DistributedSampler(
+  #         train_data, num_replicas=num_tasks, rank=global_rank, shuffle=True
+  #     )
+  #     sampler_test = torch.utils.data.DistributedSampler(
+  #         test_data, num_replicas=num_tasks, rank=global_rank, shuffle=True
+  #     )
+  #     print("Sampler_train = %s" % str(sampler_train))
   train_loader = torch.utils.data.DataLoader(
       train_data,
+      # sampler=sampler_train,
       batch_size=args.batch_size,
       shuffle=True,
       num_workers=args.num_workers,
-      pin_memory=True)
+      pin_memory=False)
 
   test_loader = torch.utils.data.DataLoader(
       test_data,
+      # sampler=sampler_test,
       batch_size=args.eval_batch_size,
       shuffle=False,
       num_workers=args.num_workers,
-      pin_memory=True)
+      pin_memory=False)
 
   # Create model
   if args.model == 'densenet':
@@ -458,6 +514,9 @@ def main():
   # Distribute model across all visible GPUs
   net = torch.nn.DataParallel(net).cuda()
   cudnn.benchmark = True
+  # if args.distributed:
+  #   net = torch.nn.parallel.DistributedDataParallel(net, device_ids=args.gpu, find_unused_parameters=True)
+    # model_without_ddp = model.module
 
   start_epoch = 0
   global epoch
@@ -527,6 +586,8 @@ def main():
   logger.info('Beginning training from epoch:{}'.format(start_epoch + 1))
   for epoch in range(start_epoch, args.epochs):
     begin_time = time.time()
+    # train_loader.sampler.set_epoch(epoch)
+    # test_loader.sampler.set_epoch(epoch)
 
     train_loss_ema = train(net, train_loader, optimizer, scheduler)
     test_loss, test_acc = test(net, test_loader)
@@ -596,15 +657,27 @@ def get_preds_and_features(model,images):
 
     handles=[]
     handles.append(model.module.features.register_forward_hook(hook))
-    for module in model.module.features:
-      if 'GELU' in module._get_name():
-          handles.append(module.register_forward_hook(hook))
+    # for module in model.module.features:
+    #   if 'GELU' in module._get_name():
+    #       handles.append(module.register_forward_hook(hook))
 
     preds = model(images)
     for handle in handles:
       handle.remove() ## hook删除 
 
-    features=features_tmp
+    # 
+    features=[]
+    device_keys=list(features_tmp.keys())
+    feature_num=len(features_tmp[device_keys[0]])
+    samples_num=features_tmp[device_keys[0]][0].shape[0]
+    for i in range(feature_num):
+      feature_i=[]
+      for key in device_keys:
+          feature_i.append(features_tmp[key][i].cuda(0))
+      feature_i=torch.cat(feature_i,dim=0)
+      features.append(feature_i)
+    # del features_tmp
+    # torch.cuda.empty_cache()
     return preds,features
 
 def get_corr(fake_Y, Y):#计算两个向量person相关系数
@@ -615,49 +688,80 @@ def get_corr(fake_Y, Y):#计算两个向量person相关系数
     return corr
 
 def my_loss(logits_all,features_all,targets):
+    marg=0.1
     logits_clean=logits_all[0]
     logits_aug1=logits_all[1]
     logits_aug2=logits_all[2]
     
     # loss for pred
-    loss_pred = F.cross_entropy(logits_clean, targets)
+    loss_pred = F.cross_entropy(logits_clean, targets[0].cuda())
     # loss_pred += F.cross_entropy(logits_aug1, targets)
     # loss_pred += F.cross_entropy(logits_aug2, targets)
     # loss_pred = loss_pred/3.
 
     # loss for jsd
+    loss_jsd=0.
+    lables=torch.hstack(targets)
+    # p_clean, p_aug1, p_aug2 = F.softmax(
+    #     logits_clean, dim=1), F.softmax(
+    #         logits_aug1, dim=1), F.softmax(
+    #             logits_aug2, dim=1)
+    # p_mixture = torch.clamp((p_clean + p_aug1 + p_aug2) / 3., 1e-7, 1).log()
+    # loss_jsd = 12 * (F.kl_div(p_mixture, p_clean, reduction='batchmean') +
+    #               F.kl_div(p_mixture, p_aug1, reduction='batchmean') +
+    #               F.kl_div(p_mixture, p_aug2, reduction='batchmean')) / 3.
     p_clean, p_aug1, p_aug2 = F.softmax(
         logits_clean, dim=1), F.softmax(
             logits_aug1, dim=1), F.softmax(
                 logits_aug2, dim=1)
-    p_mixture = torch.clamp((p_clean + p_aug1 + p_aug2) / 3., 1e-7, 1).log()
-    loss_jsd = 12 * (F.kl_div(p_mixture, p_clean, reduction='batchmean') +
-                  F.kl_div(p_mixture, p_aug1, reduction='batchmean') +
-                  F.kl_div(p_mixture, p_aug2, reduction='batchmean')) / 3.
+    p_mixture = torch.clamp((p_clean + p_aug1) / 2., 1e-7, 1).log()
+    loss_jsd = 8 * (F.kl_div(p_mixture, p_clean, reduction='batchmean') +
+                  F.kl_div(p_mixture, p_aug1, reduction='batchmean')) / 2.
 
     # loss for features
     loss_feature=0.
+    loss_nxt = NTXentLoss()
+    # # loss_nxt = pml_dist.DistributedLossWrapper(loss_nxt)
+    # loss_jsd=loss_nxt(torch.vstack(logits_all), lables)
+
+
+
+    loss_feature=[]
+    
     features_clean=features_all[0]
     features_aug1=features_all[1]
     features_aug2=features_all[2]
-    device_keys=list(features_clean.keys())
-    feature_num=len(features_clean[device_keys[0]])
-    samples_num=features_clean[device_keys[0]][0].shape[0]
-    for i in range(feature_num):
-      for key in device_keys:
-        loss_tmp=0.
-        for j in range(samples_num):
-          loss_tmp+=get_corr(features_clean[key][i][j,...].flatten(),features_aug1[key][i][j,...].flatten())
-          loss_tmp+=get_corr(features_clean[key][i][j,...].flatten(),features_aug2[key][i][j,...].flatten())
-          # loss_tmp+=F.cosine_similarity(features_clean[key][i][j,...].flatten(),features_aug1[key][i][j,...].flatten(),axis=0)
-          # loss_tmp+=F.cosine_similarity(features_clean[key][i][j,...].flatten(),features_aug2[key][i][j,...].flatten(),axis=0)
-        loss_feature+=loss_tmp.cpu()
-        # loss_tmp+=torch.norm(features_clean[key][i]-features_aug1[key][i])
-        # loss_tmp+=torch.norm(features_clean[key][i]-features_aug2[key][i])
-        # loss_feature+=loss_tmp.cpu()
-    loss_feature=1-loss_feature/feature_num/samples_num/len(device_keys)/2
+    for i in range(len(features_clean)):
+      features_tmp=torch.vstack([features_clean[i].reshape(len(logits_clean),-1),
+                                 features_aug1[i].reshape(len(logits_aug1),-1),
+                                 features_aug2[i].reshape(len(logits_aug2),-1)])
+      loss_feature.append(loss_nxt(features_tmp, lables))
+    loss_feature=torch.mean(torch.stack(loss_feature))
+    
+    # loss_feature=0.
+    # features_clean=features_all[0]
+    # features_aug1=features_all[1]
+    # features_aug2=features_all[2]
+    # device_keys=list(features_clean.keys())
+    # feature_num=len(features_clean[device_keys[0]])
+    # samples_num=features_clean[device_keys[0]][0].shape[0]
+    # for i in range(feature_num):
+    #   for key in device_keys:
+    #     for j in range(samples_num):
+    #       loss_tmp=0.
+    #       # loss_tmp+=get_corr(features_clean[key][i][j,...].flatten(),features_aug1[key][i][j,...].flatten())
+    #       # loss_tmp+=get_corr(features_clean[key][i][j,...].flatten(),features_aug2[key][i][j,...].flatten())
+    #       loss_tmp+=F.cosine_similarity(features_clean[key][i][j,...].flatten(),features_aug1[key][i][j,...].flatten(),axis=0)
+    #       loss_tmp-=F.cosine_similarity(features_clean[key][i][j,...].flatten(),features_aug2[key][i][j,...].flatten(),axis=0)
+    #       loss_tmp=loss_tmp.cpu()+1#max(loss_tmp.cpu()+1,0.)
+    #       loss_feature+=loss_tmp
+    #     # loss_feature+=loss_tmp.cpu()+marg
+    #       # loss_tmp+=torch.norm(features_clean[key][i][j,...]-features_aug1[key][i][j,...])
+    #       # loss_tmp-=torch.norm(features_clean[key][i][j,...]-features_aug2[key][i][j,...])
+    #     # loss_feature+=loss_tmp.cpu()
+    # loss_feature=loss_feature/feature_num/samples_num/len(device_keys)/2.
 
-    loss_feature=loss_feature.cuda()
+    # loss_feature=loss_feature.cuda()
 
     return loss_pred,loss_jsd,loss_feature
 

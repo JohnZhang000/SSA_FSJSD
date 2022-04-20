@@ -6,12 +6,13 @@ import general as g
 import numpy as np
 from tqdm import tqdm
 import torch
-from PIL import Image
+from PIL import Image,ImageColor
 from torch.utils.data import DataLoader
 from skimage.feature import hog
 from sklearn.metrics.pairwise import cosine_similarity
 from augment_and_mix import augment_and_mix
 from scipy.io import savemat
+from skimage.color import rgb2lab,rgb2ycbcr,rgb2luv,rgb2hsv
 
 def get_vec_sim(arrays1,arrays2):
     assert(2==len(arrays1.shape))
@@ -36,10 +37,38 @@ def get_hog(imgs):
     return features
 
 def get_spectrum(imgs):
-    images_ycbcr=g.rgb_to_ycbcr(imgs)
-    images_dct=g.img2dct(images_ycbcr)
+    # images_ycbcr=g.rgb_to_ycbcr(imgs)
+    images_dct=g.img2dct(imgs)
     # images_dct=g.img2dct_4part(images_ycbcr)
     return images_dct
+
+def get_spectrum_mag_pha(clean_imgs):
+    assert(4==len(clean_imgs.shape))
+    assert(clean_imgs.shape[2]==clean_imgs.shape[3])
+    clean_imgs=clean_imgs.transpose(0,2,3,1)
+    n = clean_imgs.shape[0]
+    c = clean_imgs.shape[3]
+    
+    block_dct=np.zeros_like(clean_imgs)
+    for i in range(n):
+        for j in range(c):
+            ch_block_cln=clean_imgs[i,:,:,j]                   
+            block_cln_tmp = np.log(1+np.abs(dct2(ch_block_cln)))
+            block_dct[i,:,:,j]=block_cln_tmp
+    block_dct=block_dct.transpose(0,3,1,2)
+    return block_dct
+
+def cvt_color(img):
+    img=img.convert('RGB')
+    img=np.array(img)
+    # img=img/255.0
+    # img=rgb2lab(img,'A')
+
+    # img=rgb2ycbcr(img)
+    img=rgb2hsv(img)
+    
+    img=img.transpose(2,0,1)
+    return img/255.0
 
 def compare_spectrum(dataset_setting_clean,dataset_setting_crupt,file_names,saved_dir):
     # 计算干净图像的频谱
@@ -48,9 +77,10 @@ def compare_spectrum(dataset_setting_clean,dataset_setting_crupt,file_names,save
     images_clean=np.zeros([image_num,image_shape[0],image_shape[1],image_shape[2]])
     for i,file_name in enumerate(file_names):
         image_tmp=Image.open(os.path.join(dataset_setting_clean.dataset_dir,'val',file_name)).resize([image_shape[1],image_shape[2]])
-        image_tmp=image_tmp.convert('RGB')
-        image_tmp=np.array(image_tmp).transpose(2,0,1)
-        images_clean[i,...]=image_tmp/255.0
+        image_tmp=cvt_color(image_tmp)
+        # image_tmp=image_tmp.convert('YCbCr')
+        # image_tmp=np.array(image_tmp).transpose(2,0,1)
+        images_clean[i,...]=image_tmp#/255.0
     images_clean=get_spectrum(images_clean)
 
     # 计算损坏图像的频谱差
@@ -61,12 +91,13 @@ def compare_spectrum(dataset_setting_clean,dataset_setting_crupt,file_names,save
         saved_dir_tmp=os.path.join(saved_dir,crupt_name)
         for j,file_name in enumerate(file_names):
             image_tmp=Image.open(os.path.join(dataset_dir,file_name)).resize([image_shape[1],image_shape[2]])
-            image_tmp=image_tmp.convert('RGB')
-            image_tmp=np.array(image_tmp).transpose(2,0,1)
-            images_crupt[j,...]=image_tmp/255.0
+            image_tmp=cvt_color(image_tmp)
+            # image_tmp=image_tmp.convert('YCbCr')
+            # image_tmp=np.array(image_tmp).transpose(2,0,1)
+            images_crupt[j,...]=image_tmp#/255.0
         images_crupt=get_spectrum(images_crupt)
-        images_diff=images_crupt-images_clean
-        images_diff=np.mean(images_diff,axis=0)
+        images_diff=(images_crupt-images_clean)
+        images_diff=np.mean(images_diff,axis=0)/(images_clean.mean(axis=0)+g.epsilon)
         g.save_images_channel(saved_dir_tmp,images_diff)
 
         for k in range(images_diff.shape[0]):
@@ -268,7 +299,7 @@ ckpt  = './models/'+model_name+'.pth.tar'
 # ckpt  = './results/2022-04-04-23_20_35/checkpoint.pth.tar'
 model=g.select_model(model_name, ckpt)
 data_setting_clean=g.dataset_setting(dataset_name)
-data_setting_crupt=g.dataset_setting(dataset_name+'-c')
+data_setting_crupt=g.dataset_setting(dataset_name+'-c',['digital/contrast','noise/impulse_noise'])
 
 # output_names(data_setting_clean.dataset_dir+'val') #随机排序并输出文件名
 images_all=open(os.path.join(data_setting_clean.dataset_dir, 'val.txt')).read().split('\n')

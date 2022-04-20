@@ -361,6 +361,42 @@ def img2dct(clean_imgs):
     block_dct=block_dct.transpose(0,3,1,2)
     return block_dct
 
+def img2dct_transform(clean_imgs):
+    assert(4==len(clean_imgs.shape))
+    assert(clean_imgs.shape[2]==clean_imgs.shape[3])
+    clean_imgs=clean_imgs.transpose(0,2,3,1)
+    n = clean_imgs.shape[0]
+    # h = clean_imgs.shape[1]
+    # w = clean_imgs.shape[2]
+    c = clean_imgs.shape[3]
+    
+    block_dct=np.zeros_like(clean_imgs)
+    for i in range(n):
+        for j in range(c):
+            ch_block_cln=clean_imgs[i,:,:,j]                   
+            block_cln_tmp = dct2(ch_block_cln)
+            block_dct[i,:,:,j]=block_cln_tmp
+    block_dct=block_dct.transpose(0,3,1,2)
+    return block_dct
+
+def dct2img_transform(dct_imgs):
+    assert(4==len(dct_imgs.shape))
+    assert(dct_imgs.shape[2]==dct_imgs.shape[3])
+    dct_imgs=dct_imgs.transpose(0,2,3,1)
+    n = dct_imgs.shape[0]
+    # h = clean_imgs.shape[1]
+    # w = clean_imgs.shape[2]
+    c = dct_imgs.shape[3]
+    
+    clean_imgs=np.zeros_like(dct_imgs)
+    for i in range(n):
+        for j in range(c):
+            ch_block_cln=dct_imgs[i,:,:,j]                   
+            block_cln_tmp = idct2(ch_block_cln)
+            clean_imgs[i,:,:,j]=block_cln_tmp
+    clean_imgs=clean_imgs.transpose(0,3,1,2)
+    return clean_imgs
+
 def img2dct_4part(clean_imgs):
     assert(4==len(clean_imgs.shape))
     assert(clean_imgs.shape[2]==clean_imgs.shape[3])
