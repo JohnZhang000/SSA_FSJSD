@@ -23,10 +23,10 @@ Example usage:
 from __future__ import print_function
 from distutils.debug import DEBUG
 
-import misc
+# import misc
 import argparse
 import os
-from sched import scheduler
+# from sched import scheduler
 import shutil
 import time
 from PIL import Image
@@ -47,10 +47,10 @@ from torchvision import datasets
 from torchvision import transforms
 import logging
 import general as g
-import albumentations
-from pytorch_metric_learning.losses import NTXentLoss
-from pytorch_metric_learning.utils import distributed as pml_dist
-
+# import albumentations
+# from pytorch_metric_learning.losses import NTXentLoss
+# from pytorch_metric_learning.utils import distributed as pml_dist
+import socket
 from torch.utils.tensorboard import SummaryWriter
 
 now = time.strftime("%Y-%m-%d-%H_%M_%S",time.localtime(time.time())) 
@@ -452,12 +452,19 @@ def main():
        transforms.Normalize([0.5] * 3, [0.5] * 3)])
   test_transform = preprocess
 
+  device=socket.gethostname()
+  if 'estar-403'==device: root_dataset_dir='/home/estar/Datasets'
+  elif 'Jet'==device: root_dataset_dir='/mnt/sdb/zhangzhuang/Datasets'
+  elif 'QuadCopter'==device: root_dataset_dir='/home/zhangzhuang/Datasets'
+  elif 'ubuntu204'==device: root_dataset_dir='/media/ubuntu204/F/Dataset'
+  else: raise Exception('Wrong device')
+
   if args.dataset == 'cifar10':
     train_data = datasets.CIFAR10(
-        '/media/ubuntu204/F/Dataset/cifar-10', train=True, transform=train_transform, download=True)
+        root_dataset_dir+'/cifar-10', train=True, transform=train_transform, download=True)
     test_data = datasets.CIFAR10(
-        '/media/ubuntu204/F/Dataset/cifar-10', train=False, transform=test_transform, download=True)
-    base_c_path = '/media/ubuntu204/F/Dataset/cifar-10-c/'
+        root_dataset_dir+'/cifar-10', train=False, transform=test_transform, download=True)
+    base_c_path = root_dataset_dir+'/cifar-10-c/'
     num_classes = 10
   else:
     train_data = datasets.CIFAR100(
@@ -722,10 +729,10 @@ def my_loss(logits_all,features_all,targets):
     # sim_aug2=torch.ones(len(targets))
     # for i in range(len(sim_aug2)):
     #   sim_aug2[i]=F.cosine_similarity(features_clean_mean,features_aug2[i,...].reshape(1,-1))
-    scale_aug1=1+(sim_aug1-1)*(sim_aug1-1)#.cuda().requires_grad_(False)
+    scale_aug1=torch.exp((sim_aug1-1)*(sim_aug1-1))#.cuda().requires_grad_(False)
     logger.debug('scale_aug1: {} {} {}'.format(scale_aug1.min(),scale_aug1.max(),scale_aug1.mean()))
 
-    scale_aug2=1+(sim_aug2-1)*(sim_aug2-1)#.cuda().requires_grad_(False)
+    scale_aug2=torch.exp((sim_aug2-1)*(sim_aug2-1))#.cuda().requires_grad_(False)
     logger.debug('scale_aug2: {} {} {}'.format(scale_aug2.min(),scale_aug2.max(),scale_aug2.mean()))
 
     # scale_aug1=scale_aug1*(torch.exp(epoch-100))
@@ -822,6 +829,7 @@ def my_loss(logits_all,features_all,targets):
 
 if __name__ == '__main__':
 
+  os.environ['CUDA_VISIBLE_DEVICES']='1'
   '''
   初始化日志系统
   '''
