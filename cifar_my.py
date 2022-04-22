@@ -455,7 +455,7 @@ def main():
   device=socket.gethostname()
   if 'estar-403'==device: root_dataset_dir='/home/estar/Datasets'
   elif 'Jet'==device: root_dataset_dir='/mnt/sdb/zhangzhuang/Datasets'
-  elif 'QuadCopter'==device: root_dataset_dir='/home/zhangzhuang/Datasets'
+  elif '1080x4-1'==device: root_dataset_dir='/home/zhangzhuang/Datasets'
   elif 'ubuntu204'==device: root_dataset_dir='/media/ubuntu204/F/Dataset'
   else: raise Exception('Wrong device')
 
