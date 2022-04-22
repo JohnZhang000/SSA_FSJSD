@@ -42,6 +42,11 @@ def get_spectrum(imgs):
     # images_dct=g.img2dct_4part(images_ycbcr)
     return images_dct
 
+def get_spectrum_L2(imgs):
+    images_dct=g.img2dct(imgs)
+    # L2s=np.linalg.norm(images_dct,axis=(-1,-2))
+    return images_dct
+
 def get_spectrum_mag_pha(clean_imgs):
     assert(4==len(clean_imgs.shape))
     assert(clean_imgs.shape[2]==clean_imgs.shape[3])
@@ -69,6 +74,42 @@ def cvt_color(img):
     
     img=img.transpose(2,0,1)
     return img/255.0
+
+def compare_spectrum_L2(dataset_setting_clean,dataset_setting_crupt,file_names,saved_dir):
+    my_mat={}
+
+    # 计算干净图像的频谱
+    image_shape=dataset_setting_clean.input_shape
+    image_num=len(file_names)
+    images_clean=np.zeros([image_num,image_shape[0],image_shape[1],image_shape[2]])
+    for i,file_name in enumerate(file_names):
+        image_tmp=Image.open(os.path.join(dataset_setting_clean.dataset_dir,'val',file_name)).resize([image_shape[1],image_shape[2]])
+        image_tmp=cvt_color(image_tmp)
+        images_clean[i,...]=image_tmp#/255.0
+    images_clean=get_spectrum_L2(images_clean)
+
+    images_clean_mean=np.mean(images_clean,axis=0)
+    images_clean_std=np.std(images_clean,axis=0)
+
+    for i in range(images_clean.shape[0]):
+        images_clean[i,...]=(images_clean[i,...]-images_clean_mean)/images_clean_std
+    my_mat={} 
+    my_mat['clean']=np.linalg.norm(images_clean,axis=(-1,-2),ord=np.inf)
+    # 计算损坏图像的频谱差
+
+    for i,dataset_dir in enumerate(tqdm(dataset_setting_crupt.dataset_dir)):
+        images_crupt=np.zeros([image_num,image_shape[0],image_shape[1],image_shape[2]])
+        crupt_name='_'.join(dataset_dir.split('/')[-3:])
+        saved_dir_tmp=os.path.join(saved_dir,crupt_name)
+        for j,file_name in enumerate(file_names):
+            image_tmp=Image.open(os.path.join(dataset_dir,file_name)).resize([image_shape[1],image_shape[2]])
+            image_tmp=cvt_color(image_tmp)
+            images_crupt[j,...]=image_tmp
+        images_crupt=get_spectrum_L2(images_crupt)
+        for i in range(images_crupt.shape[0]):
+            images_crupt[i,...]=(images_crupt[i,...]-images_clean_mean)/images_clean_std
+        my_mat[crupt_name]=np.linalg.norm(images_crupt,axis=(-1,-2),ord=np.inf)
+    savemat(os.path.join(saved_dir,'corruptions_L2.mat'),my_mat)
 
 def compare_spectrum(dataset_setting_clean,dataset_setting_crupt,file_names,saved_dir):
     # 计算干净图像的频谱
@@ -254,8 +295,8 @@ def output_names(dir_src):
 '''
 设置
 '''
-model_name='resnet50_imagenet'
-num_images=1000
+model_name='allconv'
+num_images=100
 os.environ['CUDA_VISIBLE_DEVICES']='2'
 
 now = time.strftime("%Y-%m-%d-%H_%M_%S",time.localtime(time.time())) 
@@ -299,7 +340,7 @@ ckpt  = './models/'+model_name+'.pth.tar'
 # ckpt  = './results/2022-04-04-23_20_35/checkpoint.pth.tar'
 model=g.select_model(model_name, ckpt)
 data_setting_clean=g.dataset_setting(dataset_name)
-data_setting_crupt=g.dataset_setting(dataset_name+'-c',['digital/contrast','noise/impulse_noise'])
+data_setting_crupt=g.dataset_setting(dataset_name+'-c')
 
 # output_names(data_setting_clean.dataset_dir+'val') #随机排序并输出文件名
 images_all=open(os.path.join(data_setting_clean.dataset_dir, 'val.txt')).read().split('\n')
@@ -308,9 +349,9 @@ images_selected=images_all[:num_images]
 '''
 输出频谱
 '''
-compare_spectrum(data_setting_clean,data_setting_crupt,images_selected,saved_dir)
+# compare_spectrum_L2(data_setting_clean,data_setting_crupt,images_selected,saved_dir)
 # compare_features('hog',data_setting_clean,data_setting_crupt,images_selected,saved_dir)
-# compare_features_cnn(model,data_setting_clean,data_setting_crupt,images_selected,saved_dir)
+compare_features_cnn(model,data_setting_clean,data_setting_crupt,images_selected,saved_dir)
 # severitys=[3]
 # widths=[3]
 # depths=[-1]

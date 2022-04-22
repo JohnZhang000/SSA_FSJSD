@@ -21,6 +21,7 @@ Example usage:
   `python cifar.py`
 """
 from __future__ import print_function
+from distutils.debug import DEBUG
 
 import misc
 import argparse
@@ -83,7 +84,7 @@ parser.add_argument(
     default=0.1,
     help='Initial learning rate.')
 parser.add_argument(
-    '--batch-size', '-b', type=int, default=64, help='Batch size.')
+    '--batch-size', '-b', type=int, default=128, help='Batch size.')
 parser.add_argument('--eval-batch-size', type=int, default=1000)
 parser.add_argument('--momentum', type=float, default=0.9, help='Momentum.')
 parser.add_argument(
@@ -156,12 +157,12 @@ parser.add_argument(
     help='Number of pre-fetching threads.')
 
 # distributed training parameters
-parser.add_argument('--world_size', default=1, type=int,
-                    help='number of distributed processes')
-parser.add_argument('--local_rank', default=-1, type=int)
-parser.add_argument('--dist_on_itp', action='store_true')
-parser.add_argument('--dist_url', default='env://',
-                    help='url used to set up distributed training')
+# parser.add_argument('--world_size', default=1, type=int,
+#                     help='number of distributed processes')
+# parser.add_argument('--local_rank', default=-1, type=int)
+# parser.add_argument('--dist_on_itp', action='store_true')
+# parser.add_argument('--dist_url', default='env://',
+#                     help='url used to set up distributed training')
 
 
 args = parser.parse_args()
@@ -284,9 +285,9 @@ def train(net, train_loader, optimizer, scheduler):
     optimizer.zero_grad()
 
     # images = images.cuda()
-    targets_pos = targets[0].cuda()
-    targets_aug = targets[1].cuda()
-    targets_neg = targets[2].cuda()
+    # targets_pos = targets[0].cuda()
+    # targets_aug = targets[1].cuda()
+    # targets_neg = targets[2].cuda()
     # logits = net(images)
     logits_clean,features_clean=get_preds_and_features(net,images[0].cuda())
     logits_aug1,features_aug1=get_preds_and_features(net,images[1].cuda())
@@ -295,7 +296,7 @@ def train(net, train_loader, optimizer, scheduler):
     # loss = F.cross_entropy(logits, targets)
     logits_all=[logits_clean, logits_aug1, logits_aug2]
     features_all=[features_clean,features_aug1,features_aug2]
-    targets_all=[targets_pos,targets_aug,targets_neg]
+    targets_all=targets.cuda()#[targets_pos,targets_aug,targets_neg]
     loss_pred,loss_jsd,loss_feature = my_loss(logits_all,features_all,targets_all)
     loss=loss_pred+loss_jsd+loss_feature
 
@@ -466,7 +467,7 @@ def main():
     base_c_path = './data/cifar/CIFAR-100-C/'
     num_classes = 100
 
-  train_data = My_AugMixDataset(train_data, preprocess, args.no_jsd)
+  train_data = AugMixDataset(train_data, preprocess, args.no_jsd)
 
   # if True:  # args.distributed:
   #     num_tasks = misc.get_world_size()
@@ -658,7 +659,7 @@ def get_preds_and_features(model,images):
     handles=[]
     handles.append(model.module.features.register_forward_hook(hook))
     # for module in model.module.features:
-    #   if 'GELU' in module._get_name():
+    #   if 'Conv2d' in module._get_name():
     #       handles.append(module.register_forward_hook(hook))
 
     preds = model(images)
@@ -694,14 +695,66 @@ def my_loss(logits_all,features_all,targets):
     logits_aug2=logits_all[2]
     
     # loss for pred
-    loss_pred = F.cross_entropy(logits_clean, targets[0].cuda())
+    loss_pred = F.cross_entropy(logits_clean, targets.cuda())
     # loss_pred += F.cross_entropy(logits_aug1, targets)
     # loss_pred += F.cross_entropy(logits_aug2, targets)
     # loss_pred = loss_pred/3.
 
+    loss_feature=0.
+    features_clean=features_all[0][0].reshape(len(targets),-1)
+    features_aug1=features_all[1][0].reshape(len(targets),-1)
+    features_aug2=features_all[2][0].reshape(len(targets),-1)
+    logger.debug('features_clean: {} {} {} features_aug1: {} {} {} features_aug2: {} {} {}'.format(features_clean.min(),features_clean.max(),features_clean.mean(),
+                                                                                                 features_aug1.min(),features_aug1.max(),features_aug1.mean(),
+                                                                                                 features_aug2.min(),features_aug2.max(),features_aug2.mean()))
+
+    features_clean_mean=torch.mean(features_clean,dim=0).reshape(1,-1)
+    features_clean_mean=features_clean_mean.repeat_interleave(len(targets),dim=0)
+    logger.debug('features_clean_mean: {} {} {}'.format(features_clean_mean.min(),features_clean_mean.max(),features_clean_mean.mean()))
+
+    sim_aug1=F.cosine_similarity(features_clean_mean,features_aug1,axis=-1).cuda()
+    logger.debug('sim_aug1: {} {} {}'.format(sim_aug1.min(),sim_aug1.max(),sim_aug1.mean()))
+    sim_aug2=F.cosine_similarity(features_clean_mean,features_aug2,axis=-1).cuda()
+    logger.debug('sim_aug2: {} {} {}'.format(sim_aug2.min(),sim_aug2.max(),sim_aug2.mean()))
+    # sim_aug1=torch.ones(len(targets))
+    # for i in range(len(sim_aug1)):
+    #   sim_aug1[i]=F.cosine_similarity(features_clean_mean,features_aug1[i,...].reshape(1,-1))
+    # sim_aug2=torch.ones(len(targets))
+    # for i in range(len(sim_aug2)):
+    #   sim_aug2[i]=F.cosine_similarity(features_clean_mean,features_aug2[i,...].reshape(1,-1))
+    scale_aug1=1+(sim_aug1-1)*(sim_aug1-1)#.cuda().requires_grad_(False)
+    logger.debug('scale_aug1: {} {} {}'.format(scale_aug1.min(),scale_aug1.max(),scale_aug1.mean()))
+
+    scale_aug2=1+(sim_aug2-1)*(sim_aug2-1)#.cuda().requires_grad_(False)
+    logger.debug('scale_aug2: {} {} {}'.format(scale_aug2.min(),scale_aug2.max(),scale_aug2.mean()))
+
+    # scale_aug1=scale_aug1*(torch.exp(epoch-100))
+    # scale_aug2=scale_aug2*(torch.exp(epoch-100))
+    # loss_feature=torch.mean(torch.stack(loss_feature))
+
     # loss for jsd
     loss_jsd=0.
-    lables=torch.hstack(targets)
+    p_clean, p_aug1, p_aug2 = F.softmax(
+        logits_clean, dim=1), F.softmax(
+            logits_aug1, dim=1), F.softmax(
+                logits_aug2, dim=1)
+    p_mixture = torch.clamp((p_clean + p_aug1 + p_aug2) / 3., 1e-7, 1).log()
+
+    kl_div_aug1=F.kl_div(p_mixture, p_aug1, reduction='none').mean(axis=-1)
+    kl_div_aug2=F.kl_div(p_mixture, p_aug2, reduction='none').mean(axis=-1)
+    # for i in range(len(kl_div_aug1)):
+    kl_div_aug1=kl_div_aug1*scale_aug1
+    logger.debug('kl_div_aug1: {} {} {}'.format(kl_div_aug1.min(),kl_div_aug1.max(),kl_div_aug1.mean()))
+
+    kl_div_aug2=kl_div_aug2*scale_aug2
+    logger.debug('kl_div_aug2: {} {} {}'.format(kl_div_aug2.min(),kl_div_aug2.max(),kl_div_aug2.mean()))
+
+
+    loss_jsd = 12 * (F.kl_div(p_mixture, p_clean, reduction='batchmean') +
+                  torch.mean(kl_div_aug1) +
+                  torch.mean(kl_div_aug2)) / 3.
+    # loss_jsd=0.
+    # lables=torch.hstack(targets)
     # p_clean, p_aug1, p_aug2 = F.softmax(
     #     logits_clean, dim=1), F.softmax(
     #         logits_aug1, dim=1), F.softmax(
@@ -710,33 +763,33 @@ def my_loss(logits_all,features_all,targets):
     # loss_jsd = 12 * (F.kl_div(p_mixture, p_clean, reduction='batchmean') +
     #               F.kl_div(p_mixture, p_aug1, reduction='batchmean') +
     #               F.kl_div(p_mixture, p_aug2, reduction='batchmean')) / 3.
-    p_clean, p_aug1, p_aug2 = F.softmax(
-        logits_clean, dim=1), F.softmax(
-            logits_aug1, dim=1), F.softmax(
-                logits_aug2, dim=1)
-    p_mixture = torch.clamp((p_clean + p_aug1) / 2., 1e-7, 1).log()
-    loss_jsd = 8 * (F.kl_div(p_mixture, p_clean, reduction='batchmean') +
-                  F.kl_div(p_mixture, p_aug1, reduction='batchmean')) / 2.
+    # p_clean, p_aug1, p_aug2 = F.softmax(
+    #     logits_clean, dim=1), F.softmax(
+    #         logits_aug1, dim=1), F.softmax(
+    #             logits_aug2, dim=1)
+    # p_mixture = torch.clamp((p_clean + p_aug1) / 2., 1e-7, 1).log()
+    # loss_jsd = 8 * (F.kl_div(p_mixture, p_clean, reduction='batchmean') +
+    #               F.kl_div(p_mixture, p_aug1, reduction='batchmean')) / 2.
 
     # loss for features
     loss_feature=0.
-    loss_nxt = NTXentLoss()
+    # loss_nxt = NTXentLoss()
     # # loss_nxt = pml_dist.DistributedLossWrapper(loss_nxt)
     # loss_jsd=loss_nxt(torch.vstack(logits_all), lables)
 
 
 
-    loss_feature=[]
+    # loss_feature=[]
     
-    features_clean=features_all[0]
-    features_aug1=features_all[1]
-    features_aug2=features_all[2]
-    for i in range(len(features_clean)):
-      features_tmp=torch.vstack([features_clean[i].reshape(len(logits_clean),-1),
-                                 features_aug1[i].reshape(len(logits_aug1),-1),
-                                 features_aug2[i].reshape(len(logits_aug2),-1)])
-      loss_feature.append(loss_nxt(features_tmp, lables))
-    loss_feature=torch.mean(torch.stack(loss_feature))
+    # features_clean=features_all[0]
+    # features_aug1=features_all[1]
+    # features_aug2=features_all[2]
+    # for i in range(len(features_clean)):
+    #   features_tmp=torch.vstack([features_clean[i].reshape(len(logits_clean),-1),
+    #                              features_aug1[i].reshape(len(logits_aug1),-1),
+    #                              features_aug2[i].reshape(len(logits_aug2),-1)])
+    #   loss_feature.append(loss_nxt(features_tmp, lables))
+    # loss_feature=torch.mean(torch.stack(loss_feature))
     
     # loss_feature=0.
     # features_clean=features_all[0]

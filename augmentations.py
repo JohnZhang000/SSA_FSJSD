@@ -19,8 +19,8 @@ from PIL import Image, ImageOps, ImageEnhance
 import cv2
 
 # ImageNet code should change this value
-# IMAGE_SIZE = 32
-IMAGE_SIZE = 224
+IMAGE_SIZE = 32
+# IMAGE_SIZE = 224
 
 def int_parameter(level, maxval):
   """Helper function to scale `val` between 0 and maxval .
@@ -239,7 +239,7 @@ def AddContrast(pil_img, level):
 
 augmentations = [
     autocontrast, equalize, posterize, rotate, solarize, shear_x, shear_y,
-    translate_x, translate_y#,AddImpulseNoise,AddContrast
+    translate_x, translate_y,AddImpulseNoise,AddContrast
 ]
 
 augmentations_all = [
