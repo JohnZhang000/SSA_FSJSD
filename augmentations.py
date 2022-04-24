@@ -14,6 +14,7 @@
 # ==============================================================================
 """Base augmentations operators."""
 
+import enum
 import numpy as np
 from PIL import Image, ImageOps, ImageEnhance
 import cv2
@@ -230,16 +231,48 @@ def AddContrast(pil_img, level):
     dct0=dct[:,0,0]
     scale_level=np.random.random()*1.5
     dct=dct*scale_level
-    dct[:,0,0]=dct0
+    dct[:,0,0]=dct0*(1-np.random.random()*0.01)
     # print(scale_level)
 
     img_out=dct2img(dct,sign)
     return img_out
 
+def add_noise_on_spectrum(img_channel,radius,scale,std):
+  # print('r:{} s:{}'.format(radius,scale))
+  
+  mask=np.ones_like(img_channel)*scale
+  mask+=np.random.randn(mask.shape[0],mask.shape[1])*scale*std
+
+  H,W=img_channel.shape
+  x, y = np.ogrid[:H, :W]
+  r2= x*x+y*y
+  circmask = r2 <= radius * radius
+  mask[circmask] = 0
+
+  adder=1 if np.random.uniform() < 0.5 else -1
+  masked_img=img_channel*(1+adder*mask)
+  return masked_img
+
+def my_spectrum_noiser(pil_img, level):
+  dct,sign=img2dct(pil_img)
+
+  low=1
+  high=int(np.sqrt(dct.shape[-1]*dct.shape[-1]+dct.shape[-2]*dct.shape[-2])/3)
+  std=0.1*level
+
+  for i,dct_tmp in enumerate(dct):
+    dct[i,...]=add_noise_on_spectrum(dct_tmp,np.random.randint(low,high),np.random.random(),std*np.random.random())
+
+  img_out=dct2img(dct,sign)
+  return img_out
+  
+
+
 
 augmentations = [
-    autocontrast, equalize, posterize, rotate, solarize, shear_x, shear_y,
-    translate_x, translate_y,AddImpulseNoise,AddContrast
+    # autocontrast, equalize, posterize, rotate, solarize, shear_x, shear_y,
+    # translate_x, translate_y,
+    AddImpulseNoise,AddContrast,my_spectrum_noiser
 ]
 
 augmentations_all = [

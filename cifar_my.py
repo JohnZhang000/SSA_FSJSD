@@ -32,7 +32,7 @@ import time
 from PIL import Image
 
 import augmentations
-# from augmentations import my_noise
+from augmentations import dct2img,img2dct
 from models.allconv import AllConvNet
 import numpy as np
 from models.third_party.ResNeXt_DenseNet.models.densenet import densenet
@@ -181,21 +181,48 @@ def get_lr(step, total_steps, lr_max, lr_min):
   return lr_min + (lr_max - lr_min) * 0.5 * (1 +
                                              np.cos(step / total_steps * np.pi))
 
-# def webpf(img):
-#     img=np.array(img)
-#     quality=np.random.randint(20,100)
-#     assert(img.shape[0]==img.shape[1])  
-#     # assert(img.max()>1)
-#     webp_aug = albumentations.Compose([
-#         albumentations.ImageCompression(quality_lower=quality,quality_upper=quality,compression_type=0,p=1),
-#         # albumentations.HorizontalFlip(p=0.5)
-#         ])
-    
-#     augmented = webp_aug(image=img)
-#     auged = augmented['image']/255.0
-#     auged = torch.from_numpy(auged).permute(2,0,1).float()
-#     # img = Image.fromarray(img.astype('uint8')).convert('RGB')
-#     return auged
+def add_noise_on_spectrum(imgs_spectrum):
+  # print('r:{} s:{}'.format(radius,scale))
+  c,h,w=imgs_spectrum.shape
+  for i,img_channel in enumerate(imgs_spectrum):
+    low=1
+    high=int(h/3)
+    radius=np.random.uniform(low,high)
+    scale=np.random.uniform()
+    std=np.random.uniform()
+
+
+    mask=np.ones_like(img_channel)*scale
+    mask+=np.random.randn(h,w)*scale*std
+
+    # H,W=img_channel.shape
+    x, y = np.ogrid[:h, :w]
+    r2= x*x+y*y
+    circmask = r2 <= radius * radius
+    mask[circmask] = 0
+
+    adder=1 if np.random.uniform() < 0.5 else -1
+    imgs_spectrum[i,...]=img_channel*(1+adder*mask)
+  return imgs_spectrum
+
+def spectrum_mix(pil_img, preprocess):
+  dct,sign=img2dct(pil_img)
+
+  ws = np.float32(np.random.dirichlet([1] * args.mixture_width))
+  m = np.float32(np.random.beta(1, 1))
+
+  mix = np.zeros_like(dct)
+  for i in range(args.mixture_width):
+    dct_aug = dct.copy()
+    depth = args.mixture_depth if args.mixture_depth > 0 else np.random.randint(1, 10)
+    for _ in range(depth):
+      image_aug = add_noise_on_spectrum(dct_aug)
+    # Preprocessing commutes since all coefficients are convex
+    mix += ws[i] * image_aug
+  # mix = (1 - m) * dct + m * mix
+  img_out=dct2img(mix,sign)
+  img_out=preprocess(img_out)
+  return img_out
 
 
 
@@ -220,7 +247,7 @@ def aug(image, preprocess):
   for i in range(args.mixture_width):
     image_aug = image.copy()
     depth = args.mixture_depth if args.mixture_depth > 0 else np.random.randint(
-        1, 4)
+        1, 10)
     for _ in range(depth):
       op = np.random.choice(aug_list)
       image_aug = op(image_aug, args.aug_severity)
@@ -228,6 +255,9 @@ def aug(image, preprocess):
     mix += ws[i] * preprocess(image_aug)
 
   mixed = (1 - m) * preprocess(image) + m * mix
+  # mixed = mix#np.array(augmentations.my_spectrum_noiser(image,np.random.randint(1, 10)))/255.0
+  # mixed=Image.fromarray(np.uint8(mixed*255))
+  # mixed=preprocess(mixed)
   return mixed
 
 
@@ -246,6 +276,8 @@ class AugMixDataset(torch.utils.data.Dataset):
     else:
       im_tuple = (self.preprocess(x), aug(x, self.preprocess),
                   aug(x, self.preprocess))
+      # im_tuple = (self.preprocess(x), spectrum_mix(x, self.preprocess),
+      #       spectrum_mix(x, self.preprocess))
       return im_tuple, y
 
   def __len__(self):

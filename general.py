@@ -91,7 +91,7 @@ class dataset_setting():
             self.root_dataset_dir='/mnt/sdb/zhangzhuang/Datasets'
             self.workers=32
             self.device_num=3
-        elif 'QuadCopter'==self.device:
+        elif '1080x4-1'==self.device:
             self.root_dataset_dir='/home/zhangzhuang/Datasets'
             self.workers=48
             self.device_num=2
