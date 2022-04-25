@@ -4,6 +4,7 @@ from augmentations import img2dct,dct2img,AddContrast,AddImpulseNoise,my_spectru
 import numpy as np
 import cv2
 from augmentations import dct2img,img2dct
+from scipy.io import loadmat
 IMAGE_SIZE=224
 
 # noise_Y=np.loadtxt('0.txt')
@@ -57,48 +58,50 @@ IMAGE_SIZE=224
 #   mixed=Image.fromarray(np.uint8(mixed*255))
 #   return mixed
 
-def add_noise_on_spectrum(imgs_spectrum):
-  # print('r:{} s:{}'.format(radius,scale))
-  c,h,w=imgs_spectrum.shape
-  for i,img_channel in enumerate(imgs_spectrum):
-    low=1
-    high=int(h/3)
-    radius=np.random.uniform(low,high)
-    scale=np.random.uniform()
-    std=np.random.uniform(0,1)
+# def add_noise_on_spectrum(imgs_spectrum):
+#   # print('r:{} s:{}'.format(radius,scale))
+#   c,h,w=imgs_spectrum.shape
+#   for i,img_channel in enumerate(imgs_spectrum):
+#     low=1
+#     high=int(h/3)
+#     radius=np.random.uniform(low,high)
+#     scale=np.random.uniform()
+#     std=np.random.uniform(0,1)
 
 
-    mask=np.ones_like(img_channel)*scale
-    mask+=np.random.randn(h,w)*scale*std
+#     mask=np.ones_like(img_channel)*scale
+#     mask+=np.random.randn(h,w)*scale*std
 
-    # H,W=img_channel.shape
-    x, y = np.ogrid[:h, :w]
-    r2= x*x+y*y
-    circmask = r2 <= radius * radius
-    mask[circmask] = 0
+#     # H,W=img_channel.shape
+#     x, y = np.ogrid[:h, :w]
+#     r2= x*x+y*y
+#     circmask = r2 <= radius * radius
+#     mask[circmask] = 0
 
-    adder=1 if np.random.uniform() < 0.5 else -1
-    imgs_spectrum[i,...]=img_channel*(1+adder*mask)
-  return imgs_spectrum
+#     adder=1 if np.random.uniform() < 0.5 else -1
+#     imgs_spectrum[i,...]=img_channel*(1+adder*mask)
+#   return imgs_spectrum
 
-def spectrum_mix(pil_img):
-  dct,sign=img2dct(pil_img)
+# def spectrum_mix(pil_img):
+#   dct,sign=img2dct(pil_img)
 
-  ws = np.float32(np.random.dirichlet([1] * 3))
-  m = np.float32(np.random.beta(1, 1))
+#   ws = np.float32(np.random.dirichlet([1] * 3))
+#   m = np.float32(np.random.beta(1, 1))
 
-  mix = np.zeros_like(dct)
-  for i in range(3):
-    dct_aug = dct.copy()
-    depth = 3# if args.mixture_depth > 0 else np.random.randint(1, 10)
-    for _ in range(depth):
-      image_aug = add_noise_on_spectrum(dct_aug)
-    # Preprocessing commutes since all coefficients are convex
-    mix += ws[i] * image_aug
-  # mix = (1 - m) * dct + m * mix
-  img_out=dct2img(mix,sign)
-  # img_out=preprocess(img_out)
-  return img_out
+#   mix = np.zeros_like(dct)
+#   for i in range(3):
+#     dct_aug = dct.copy()
+#     depth = 3# if args.mixture_depth > 0 else np.random.randint(1, 10)
+#     for _ in range(depth):
+#       image_aug = add_noise_on_spectrum(dct_aug)
+#     # Preprocessing commutes since all coefficients are convex
+#     mix += ws[i] * image_aug
+#   # mix = (1 - m) * dct + m * mix
+#   img_out=dct2img(mix,sign)
+#   # img_out=preprocess(img_out)
+#   return img_out
+
+
 
 img=Image.open('n01440764_18.JPEG').resize((IMAGE_SIZE,IMAGE_SIZE))
 
@@ -106,7 +109,7 @@ img=Image.open('n01440764_18.JPEG').resize((IMAGE_SIZE,IMAGE_SIZE))
 # img_out=spectrum_mix(img)
 level=np.random.randint(0,10)
 print(level)
-img_out=AddImpulseNoise(img,level)
+img_out=my_spectrum_noiser(img,level)
 
 # dct,sign=img2dct(img)
 

@@ -125,6 +125,7 @@ def compare_spectrum(dataset_setting_clean,dataset_setting_crupt,file_names,save
 
     # 计算损坏图像的频谱差
     my_mat={}
+    my_std={}
     for i,dataset_dir in enumerate(dataset_setting_crupt.dataset_dir):
         images_crupt=np.zeros_like(images_clean)
         crupt_name='_'.join(dataset_dir.split('/')[-3:])
@@ -135,12 +136,15 @@ def compare_spectrum(dataset_setting_clean,dataset_setting_crupt,file_names,save
             images_crupt[j,...]=image_tmp#/255.0
         images_crupt=get_spectrum(images_crupt)
         images_diff=(images_crupt-images_clean)
+        images_std=images_diff.std(axis=0)/(images_clean.mean(axis=0)+g.epsilon)
         images_diff=np.mean(images_diff,axis=0)/(images_clean.mean(axis=0)+g.epsilon)
         g.save_images_channel(saved_dir_tmp,images_diff)
 
         for k in range(images_diff.shape[0]):
             my_mat[crupt_name+'_c'+str(k)]=images_diff[k,...]
+            my_std[crupt_name+'_c'+str(k)]=images_std[k,...]
     savemat(os.path.join(saved_dir,'corruptions.mat'),my_mat)
+    savemat(os.path.join(saved_dir,'corruptions_std.mat'),my_std)
     
 
 def compare_features(compare_type,dataset_setting_clean,dataset_setting_crupt,file_names,saved_dir):
@@ -293,7 +297,7 @@ def output_names(dir_src):
 设置
 '''
 model_name='resnet50_imagenet'
-num_images=100
+num_images=1000
 os.environ['CUDA_VISIBLE_DEVICES']='0'
 
 now = time.strftime("%Y-%m-%d-%H_%M_%S",time.localtime(time.time())) 
@@ -346,7 +350,8 @@ images_selected=images_all[:num_images]
 '''
 输出频谱
 '''
-compare_spectrum_tc(data_setting_clean,data_setting_crupt,images_selected,saved_dir)
+compare_spectrum(data_setting_clean,data_setting_crupt,images_selected,saved_dir)
+# compare_spectrum_tc(data_setting_clean,data_setting_crupt,images_selected,saved_dir)
 # compare_features('hog',data_setting_clean,data_setting_crupt,images_selected,saved_dir)
 # compare_features_cnn(model,data_setting_clean,data_setting_crupt,images_selected,saved_dir)
 # severitys=[3]

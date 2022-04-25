@@ -18,10 +18,11 @@ import enum
 import numpy as np
 from PIL import Image, ImageOps, ImageEnhance
 import cv2
+from scipy.io import loadmat
 
 # ImageNet code should change this value
-IMAGE_SIZE = 32
-# IMAGE_SIZE = 224
+# IMAGE_SIZE = 32
+IMAGE_SIZE = 224
 
 def int_parameter(level, maxval):
   """Helper function to scale `val` between 0 and maxval .
@@ -241,7 +242,7 @@ def add_noise_on_spectrum(img_channel,radius,scale,std):
   # print('r:{} s:{}'.format(radius,scale))
   
   mask=np.ones_like(img_channel)*scale
-  mask+=np.random.randn(mask.shape[0],mask.shape[1])*scale*std
+  mask+=np.random.randn(mask.shape[0],mask.shape[1])*std
 
   H,W=img_channel.shape
   x, y = np.ogrid[:H, :W]
@@ -253,19 +254,48 @@ def add_noise_on_spectrum(img_channel,radius,scale,std):
   masked_img=img_channel*(1+adder*mask)
   return masked_img
 
+# def my_spectrum_noiser(pil_img, level):
+#   dct,sign=img2dct(pil_img)
+#   dct0=dct[:,0,0]
+
+#   low=1
+#   high=int(np.sqrt(dct.shape[-1]*dct.shape[-1]+dct.shape[-2]*dct.shape[-2])/3)
+#   std=level/3
+
+#   for i,dct_tmp in enumerate(dct):
+#     dct[i,...]=add_noise_on_spectrum(dct_tmp,np.random.randint(low,high),1.5*np.random.random(),std*np.random.random())
+#     # dct[i,...]=dct[i,...]*np.random.randn(dct.shape[-1],dct.shape[-2])*np.random.random()
+  
+#   dct[:,0,0]=dct0*(1-np.random.random()/10)+dct0*np.random.random()*0.01
+
+#   img_out=dct2img(dct,sign)
+#   return img_out
+  
+corruptions_mean=loadmat('corruptions.mat')
+corruptions_std=loadmat('corruptions_std.mat')
+corruptions_name=list(corruptions_mean.keys())
+corruptions_name.remove('__header__')
+corruptions_name.remove('__version__')
+corruptions_name.remove('__globals__')
+
+
 def my_spectrum_noiser(pil_img, level):
   dct,sign=img2dct(pil_img)
-
-  low=1
-  high=int(np.sqrt(dct.shape[-1]*dct.shape[-1]+dct.shape[-2]*dct.shape[-2])/3)
-  std=0.1*level
+  c,h,w=dct.shape
 
   for i,dct_tmp in enumerate(dct):
-    dct[i,...]=add_noise_on_spectrum(dct_tmp,np.random.randint(low,high),np.random.random(),std*np.random.random())
 
+    corrupt=corruptions_name[np.random.randint(0,len(corruptions_name))]
+    mean_off=corruptions_mean[corrupt].astype(np.float32)
+    std_off=corruptions_std[corrupt].astype(np.float32)
+    mean_off= cv2.resize(mean_off, dsize=(IMAGE_SIZE, IMAGE_SIZE), interpolation=cv2.INTER_CUBIC)
+    std_off= cv2.resize(std_off, dsize=(IMAGE_SIZE, IMAGE_SIZE), interpolation=cv2.INTER_CUBIC)
+    mean_off=mean_off*np.random.randn()#(np.random.randn(h,w))#*level/100)*#(1+np.random.random())#
+    std_off=std_off*np.random.randn(h,w)*level/15#(1+np.random.random())#(np.random.randn(h,w)*level/100)
+    dct[i,...]=dct_tmp*(1+dct_tmp）*std_off))#+mean_off*dct_tmp
+  
   img_out=dct2img(dct,sign)
   return img_out
-  
 
 
 
