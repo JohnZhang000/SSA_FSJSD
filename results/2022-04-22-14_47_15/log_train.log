@@ -1,0 +1,125 @@
+2022-04-22 14:47:19 - r - INFO -Beginning training from epoch:1
+2022-04-22 14:48:31 - r - INFO -Epoch   1 | Time    71 | Train Loss 1.3807 | Test Loss 0.001 | Test Error 38.40
+2022-04-22 14:49:44 - r - INFO -Epoch   2 | Time    73 | Train Loss 1.1781 | Test Loss 0.001 | Test Error 33.68
+2022-04-22 14:51:01 - r - INFO -Epoch   3 | Time    76 | Train Loss 1.0538 | Test Loss 0.001 | Test Error 25.07
+2022-04-22 14:52:19 - r - INFO -Epoch   4 | Time    77 | Train Loss 1.0298 | Test Loss 0.001 | Test Error 21.91
+2022-04-22 14:53:38 - r - INFO -Epoch   5 | Time    79 | Train Loss 0.9488 | Test Loss 0.001 | Test Error 19.47
+2022-04-22 14:54:59 - r - INFO -Epoch   6 | Time    80 | Train Loss 0.9288 | Test Loss 0.001 | Test Error 20.75
+2022-04-22 14:56:21 - r - INFO -Epoch   7 | Time    81 | Train Loss 0.8904 | Test Loss 0.001 | Test Error 20.08
+2022-04-22 14:57:43 - r - INFO -Epoch   8 | Time    82 | Train Loss 0.8855 | Test Loss 0.001 | Test Error 18.34
+2022-04-22 14:59:05 - r - INFO -Epoch   9 | Time    82 | Train Loss 0.8788 | Test Loss 0.001 | Test Error 19.04
+2022-04-22 15:00:28 - r - INFO -Epoch  10 | Time    82 | Train Loss 0.8952 | Test Loss 0.001 | Test Error 18.95
+2022-04-22 15:01:51 - r - INFO -Epoch  11 | Time    82 | Train Loss 0.8595 | Test Loss 0.001 | Test Error 17.81
+2022-04-22 15:03:15 - r - INFO -Epoch  12 | Time    83 | Train Loss 0.8477 | Test Loss 0.000 | Test Error 16.62
+2022-04-22 15:04:39 - r - INFO -Epoch  13 | Time    83 | Train Loss 0.8085 | Test Loss 0.001 | Test Error 17.76
+2022-04-22 15:06:01 - r - INFO -Epoch  14 | Time    82 | Train Loss 0.8231 | Test Loss 0.001 | Test Error 17.79
+2022-04-22 15:07:25 - r - INFO -Epoch  15 | Time    83 | Train Loss 0.8221 | Test Loss 0.001 | Test Error 16.68
+2022-04-22 15:08:48 - r - INFO -Epoch  16 | Time    83 | Train Loss 0.8277 | Test Loss 0.000 | Test Error 16.04
+2022-04-22 15:10:10 - r - INFO -Epoch  17 | Time    82 | Train Loss 0.8132 | Test Loss 0.000 | Test Error 16.33
+2022-04-22 15:11:34 - r - INFO -Epoch  18 | Time    84 | Train Loss 0.7883 | Test Loss 0.001 | Test Error 17.74
+2022-04-22 15:12:57 - r - INFO -Epoch  19 | Time    82 | Train Loss 0.7602 | Test Loss 0.000 | Test Error 15.66
+2022-04-22 15:14:21 - r - INFO -Epoch  20 | Time    84 | Train Loss 0.7790 | Test Loss 0.000 | Test Error 14.54
+2022-04-22 15:15:45 - r - INFO -Epoch  21 | Time    83 | Train Loss 0.7782 | Test Loss 0.000 | Test Error 14.58
+2022-04-22 15:17:08 - r - INFO -Epoch  22 | Time    83 | Train Loss 0.7562 | Test Loss 0.000 | Test Error 14.72
+2022-04-22 15:18:32 - r - INFO -Epoch  23 | Time    83 | Train Loss 0.7626 | Test Loss 0.000 | Test Error 15.19
+2022-04-22 15:19:55 - r - INFO -Epoch  24 | Time    83 | Train Loss 0.7550 | Test Loss 0.000 | Test Error 15.96
+2022-04-22 15:21:17 - r - INFO -Epoch  25 | Time    82 | Train Loss 0.7473 | Test Loss 0.000 | Test Error 15.30
+2022-04-22 15:22:40 - r - INFO -Epoch  26 | Time    82 | Train Loss 0.7423 | Test Loss 0.000 | Test Error 13.36
+2022-04-22 15:24:02 - r - INFO -Epoch  27 | Time    81 | Train Loss 0.7447 | Test Loss 0.000 | Test Error 14.48
+2022-04-22 15:25:24 - r - INFO -Epoch  28 | Time    82 | Train Loss 0.7424 | Test Loss 0.000 | Test Error 13.75
+2022-04-22 15:26:47 - r - INFO -Epoch  29 | Time    83 | Train Loss 0.7503 | Test Loss 0.000 | Test Error 13.99
+2022-04-22 15:28:10 - r - INFO -Epoch  30 | Time    82 | Train Loss 0.7518 | Test Loss 0.000 | Test Error 13.94
+2022-04-22 15:29:33 - r - INFO -Epoch  31 | Time    82 | Train Loss 0.7421 | Test Loss 0.000 | Test Error 14.93
+2022-04-22 15:30:56 - r - INFO -Epoch  32 | Time    83 | Train Loss 0.7442 | Test Loss 0.000 | Test Error 14.69
+2022-04-22 15:32:19 - r - INFO -Epoch  33 | Time    82 | Train Loss 0.7323 | Test Loss 0.000 | Test Error 14.15
+2022-04-22 15:33:43 - r - INFO -Epoch  34 | Time    83 | Train Loss 0.7037 | Test Loss 0.000 | Test Error 13.57
+2022-04-22 15:35:06 - r - INFO -Epoch  35 | Time    83 | Train Loss 0.7097 | Test Loss 0.000 | Test Error 13.06
+2022-04-22 15:36:29 - r - INFO -Epoch  36 | Time    83 | Train Loss 0.6989 | Test Loss 0.000 | Test Error 15.46
+2022-04-22 15:37:53 - r - INFO -Epoch  37 | Time    83 | Train Loss 0.6985 | Test Loss 0.000 | Test Error 13.58
+2022-04-22 15:39:16 - r - INFO -Epoch  38 | Time    83 | Train Loss 0.7032 | Test Loss 0.000 | Test Error 13.44
+2022-04-22 15:40:40 - r - INFO -Epoch  39 | Time    84 | Train Loss 0.6916 | Test Loss 0.000 | Test Error 14.29
+2022-04-22 15:42:04 - r - INFO -Epoch  40 | Time    83 | Train Loss 0.6929 | Test Loss 0.000 | Test Error 12.54
+2022-04-22 15:43:28 - r - INFO -Epoch  41 | Time    84 | Train Loss 0.7020 | Test Loss 0.000 | Test Error 12.67
+2022-04-22 15:44:52 - r - INFO -Epoch  42 | Time    83 | Train Loss 0.7074 | Test Loss 0.000 | Test Error 14.50
+2022-04-22 15:46:16 - r - INFO -Epoch  43 | Time    84 | Train Loss 0.6828 | Test Loss 0.000 | Test Error 12.68
+2022-04-22 15:47:40 - r - INFO -Epoch  44 | Time    83 | Train Loss 0.7109 | Test Loss 0.000 | Test Error 13.52
+2022-04-22 15:49:03 - r - INFO -Epoch  45 | Time    83 | Train Loss 0.6575 | Test Loss 0.000 | Test Error 11.88
+2022-04-22 15:50:27 - r - INFO -Epoch  46 | Time    83 | Train Loss 0.6598 | Test Loss 0.000 | Test Error 11.81
+2022-04-22 15:51:51 - r - INFO -Epoch  47 | Time    84 | Train Loss 0.6546 | Test Loss 0.000 | Test Error 12.67
+2022-04-22 15:53:14 - r - INFO -Epoch  48 | Time    83 | Train Loss 0.6923 | Test Loss 0.000 | Test Error 13.67
+2022-04-22 15:54:38 - r - INFO -Epoch  49 | Time    83 | Train Loss 0.6565 | Test Loss 0.000 | Test Error 13.05
+2022-04-22 15:56:03 - r - INFO -Epoch  50 | Time    85 | Train Loss 0.6701 | Test Loss 0.000 | Test Error 12.22
+2022-04-22 15:57:31 - r - INFO -Epoch  51 | Time    87 | Train Loss 0.6437 | Test Loss 0.000 | Test Error 12.27
+2022-04-22 15:58:59 - r - INFO -Epoch  52 | Time    88 | Train Loss 0.6821 | Test Loss 0.000 | Test Error 11.81
+2022-04-22 16:00:25 - r - INFO -Epoch  53 | Time    86 | Train Loss 0.6509 | Test Loss 0.000 | Test Error 12.49
+2022-04-22 16:01:51 - r - INFO -Epoch  54 | Time    85 | Train Loss 0.6397 | Test Loss 0.000 | Test Error 11.32
+2022-04-22 16:03:16 - r - INFO -Epoch  55 | Time    85 | Train Loss 0.6112 | Test Loss 0.000 | Test Error 11.29
+2022-04-22 16:04:40 - r - INFO -Epoch  56 | Time    84 | Train Loss 0.6122 | Test Loss 0.000 | Test Error 10.60
+2022-04-22 16:06:04 - r - INFO -Epoch  57 | Time    84 | Train Loss 0.6178 | Test Loss 0.000 | Test Error 10.95
+2022-04-22 16:07:28 - r - INFO -Epoch  58 | Time    83 | Train Loss 0.6329 | Test Loss 0.000 | Test Error 10.63
+2022-04-22 16:08:52 - r - INFO -Epoch  59 | Time    83 | Train Loss 0.6186 | Test Loss 0.000 | Test Error 10.91
+2022-04-22 16:10:16 - r - INFO -Epoch  60 | Time    83 | Train Loss 0.5732 | Test Loss 0.000 | Test Error 11.14
+2022-04-22 16:11:40 - r - INFO -Epoch  61 | Time    84 | Train Loss 0.5912 | Test Loss 0.000 | Test Error 10.47
+2022-04-22 16:13:05 - r - INFO -Epoch  62 | Time    84 | Train Loss 0.6144 | Test Loss 0.000 | Test Error 10.14
+2022-04-22 16:14:29 - r - INFO -Epoch  63 | Time    84 | Train Loss 0.5712 | Test Loss 0.000 | Test Error 10.84
+2022-04-22 16:15:54 - r - INFO -Epoch  64 | Time    85 | Train Loss 0.5816 | Test Loss 0.000 | Test Error 11.58
+2022-04-22 16:17:24 - r - INFO -Epoch  65 | Time    89 | Train Loss 0.6236 | Test Loss 0.000 | Test Error 10.12
+2022-04-22 16:18:51 - r - INFO -Epoch  66 | Time    86 | Train Loss 0.5889 | Test Loss 0.000 | Test Error 9.80
+2022-04-22 16:20:16 - r - INFO -Epoch  67 | Time    85 | Train Loss 0.5724 | Test Loss 0.000 | Test Error 9.62
+2022-04-22 16:21:42 - r - INFO -Epoch  68 | Time    85 | Train Loss 0.5580 | Test Loss 0.000 | Test Error 9.66
+2022-04-22 16:23:07 - r - INFO -Epoch  69 | Time    85 | Train Loss 0.5674 | Test Loss 0.000 | Test Error 9.35
+2022-04-22 16:24:32 - r - INFO -Epoch  70 | Time    84 | Train Loss 0.5355 | Test Loss 0.000 | Test Error 9.56
+2022-04-22 16:25:56 - r - INFO -Epoch  71 | Time    84 | Train Loss 0.5391 | Test Loss 0.000 | Test Error 9.49
+2022-04-22 16:27:22 - r - INFO -Epoch  72 | Time    85 | Train Loss 0.5191 | Test Loss 0.000 | Test Error 8.82
+2022-04-22 16:28:48 - r - INFO -Epoch  73 | Time    86 | Train Loss 0.5205 | Test Loss 0.000 | Test Error 9.08
+2022-04-22 16:30:14 - r - INFO -Epoch  74 | Time    85 | Train Loss 0.5006 | Test Loss 0.000 | Test Error 9.89
+2022-04-22 16:31:39 - r - INFO -Epoch  75 | Time    85 | Train Loss 0.5011 | Test Loss 0.000 | Test Error 8.74
+2022-04-22 16:33:04 - r - INFO -Epoch  76 | Time    84 | Train Loss 0.5142 | Test Loss 0.000 | Test Error 8.87
+2022-04-22 16:34:29 - r - INFO -Epoch  77 | Time    84 | Train Loss 0.5028 | Test Loss 0.000 | Test Error 8.14
+2022-04-22 16:35:54 - r - INFO -Epoch  78 | Time    85 | Train Loss 0.4954 | Test Loss 0.000 | Test Error 8.38
+2022-04-22 16:37:20 - r - INFO -Epoch  79 | Time    85 | Train Loss 0.4842 | Test Loss 0.000 | Test Error 8.21
+2022-04-22 16:38:44 - r - INFO -Epoch  80 | Time    84 | Train Loss 0.4781 | Test Loss 0.000 | Test Error 7.93
+2022-04-22 16:40:08 - r - INFO -Epoch  81 | Time    84 | Train Loss 0.4852 | Test Loss 0.000 | Test Error 7.89
+2022-04-22 16:41:33 - r - INFO -Epoch  82 | Time    84 | Train Loss 0.4715 | Test Loss 0.000 | Test Error 7.63
+2022-04-22 16:42:58 - r - INFO -Epoch  83 | Time    85 | Train Loss 0.4607 | Test Loss 0.000 | Test Error 7.81
+2022-04-22 16:44:23 - r - INFO -Epoch  84 | Time    84 | Train Loss 0.4472 | Test Loss 0.000 | Test Error 7.54
+2022-04-22 16:45:47 - r - INFO -Epoch  85 | Time    84 | Train Loss 0.4417 | Test Loss 0.000 | Test Error 7.36
+2022-04-22 16:47:12 - r - INFO -Epoch  86 | Time    84 | Train Loss 0.4265 | Test Loss 0.000 | Test Error 7.06
+2022-04-22 16:48:36 - r - INFO -Epoch  87 | Time    84 | Train Loss 0.4132 | Test Loss 0.000 | Test Error 6.98
+2022-04-22 16:50:03 - r - INFO -Epoch  88 | Time    86 | Train Loss 0.4338 | Test Loss 0.000 | Test Error 6.84
+2022-04-22 16:51:31 - r - INFO -Epoch  89 | Time    88 | Train Loss 0.4349 | Test Loss 0.000 | Test Error 6.68
+2022-04-22 16:53:02 - r - INFO -Epoch  90 | Time    90 | Train Loss 0.3925 | Test Loss 0.000 | Test Error 6.81
+2022-04-22 16:54:32 - r - INFO -Epoch  91 | Time    89 | Train Loss 0.3762 | Test Loss 0.000 | Test Error 6.67
+2022-04-22 16:56:04 - r - INFO -Epoch  92 | Time    92 | Train Loss 0.4159 | Test Loss 0.000 | Test Error 6.82
+2022-04-22 16:57:35 - r - INFO -Epoch  93 | Time    91 | Train Loss 0.3866 | Test Loss 0.000 | Test Error 6.70
+2022-04-22 16:59:08 - r - INFO -Epoch  94 | Time    92 | Train Loss 0.3906 | Test Loss 0.000 | Test Error 6.51
+2022-04-22 17:00:38 - r - INFO -Epoch  95 | Time    90 | Train Loss 0.3929 | Test Loss 0.000 | Test Error 6.51
+2022-04-22 17:02:10 - r - INFO -Epoch  96 | Time    91 | Train Loss 0.3908 | Test Loss 0.000 | Test Error 6.66
+2022-04-22 17:03:40 - r - INFO -Epoch  97 | Time    90 | Train Loss 0.3818 | Test Loss 0.000 | Test Error 6.42
+2022-04-22 17:05:12 - r - INFO -Epoch  98 | Time    91 | Train Loss 0.3838 | Test Loss 0.000 | Test Error 6.53
+2022-04-22 17:06:46 - r - INFO -Epoch  99 | Time    93 | Train Loss 0.3844 | Test Loss 0.000 | Test Error 6.50
+2022-04-22 17:08:17 - r - INFO -Epoch 100 | Time    91 | Train Loss 0.3933 | Test Loss 0.000 | Test Error 6.37
+2022-04-22 17:08:32 - r - INFO -defocus_blur * Acc@1 91.354 Acc@5 99.726
+2022-04-22 17:08:44 - r - INFO -glass_blur * Acc@1 82.548 Acc@5 99.154
+2022-04-22 17:08:56 - r - INFO -motion_blur * Acc@1 89.190 Acc@5 99.632
+2022-04-22 17:09:06 - r - INFO -zoom_blur * Acc@1 90.526 Acc@5 99.640
+2022-04-22 17:09:18 - r - INFO -contrast * Acc@1 86.088 Acc@5 99.232
+2022-04-22 17:09:29 - r - INFO -elastic_transform * Acc@1 89.314 Acc@5 99.612
+2022-04-22 17:09:41 - r - INFO -jpeg_compression * Acc@1 86.638 Acc@5 99.542
+2022-04-22 17:09:52 - r - INFO -pixelate * Acc@1 89.168 Acc@5 99.528
+2022-04-22 17:10:03 - r - INFO -gaussian_noise * Acc@1 86.196 Acc@5 99.438
+2022-04-22 17:10:14 - r - INFO -impulse_noise * Acc@1 85.988 Acc@5 99.414
+2022-04-22 17:10:25 - r - INFO -shot_noise * Acc@1 88.272 Acc@5 99.556
+2022-04-22 17:10:36 - r - INFO -brightness * Acc@1 92.570 Acc@5 99.814
+2022-04-22 17:10:46 - r - INFO -fog * Acc@1 88.400 Acc@5 99.528
+2022-04-22 17:10:57 - r - INFO -frost * Acc@1 88.668 Acc@5 99.574
+2022-04-22 17:11:07 - r - INFO -snow * Acc@1 88.432 Acc@5 99.528
+2022-04-22 17:11:18 - r - INFO -gaussian_blur * Acc@1 90.280 Acc@5 99.664
+2022-04-22 17:11:28 - r - INFO -saturate * Acc@1 89.348 Acc@5 99.456
+2022-04-22 17:11:39 - r - INFO -spatter * Acc@1 90.644 Acc@5 99.696
+2022-04-22 17:11:50 - r - INFO -speckle_noise * Acc@1 88.692 Acc@5 99.630
+2022-04-22 17:11:50 - r - INFO -Corruption 15* Acc@1 88.580 Acc@5 99.547
+2022-04-22 17:11:50 - r - INFO -C_Acc1: 88.543, C_Acc5: 99.545
+
+
+my_impulse + my_contrast + exp_loss + level 10 + smaller impulse map
