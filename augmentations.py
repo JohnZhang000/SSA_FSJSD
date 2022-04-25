@@ -291,8 +291,8 @@ def my_spectrum_noiser(pil_img, level):
     mean_off= cv2.resize(mean_off, dsize=(IMAGE_SIZE, IMAGE_SIZE), interpolation=cv2.INTER_CUBIC)
     std_off= cv2.resize(std_off, dsize=(IMAGE_SIZE, IMAGE_SIZE), interpolation=cv2.INTER_CUBIC)
     mean_off=mean_off*np.random.randn()#(np.random.randn(h,w))#*level/100)*#(1+np.random.random())#
-    std_off=std_off*np.random.randn(h,w)*level/15#(1+np.random.random())#(np.random.randn(h,w)*level/100)
-    dct[i,...]=dct_tmp*(1+dct_tmp）*std_off))#+mean_off*dct_tmp
+    std_off=std_off*np.random.randn(h,w)*level/10#(1+np.random.random())#(np.random.randn(h,w)*level/100)
+    dct[i,...]=dct_tmp+dct_tmp*mean_off*(1+std_off*3)#dct_tmp*std_off++mean_off*dct_tmp
   
   img_out=dct2img(dct,sign)
   return img_out
