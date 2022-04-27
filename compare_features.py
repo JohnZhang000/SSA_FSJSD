@@ -160,12 +160,21 @@ def spectrum_pca(dataset_setting_clean,dataset_setting_crupt,file_names,saved_di
         image_tmp=cvt_color(image_tmp)
         images_clean[i,...]=image_tmp#/255.0
     images_clean=get_spectrum(images_clean)
+    np.save(os.path.join(saved_dir,'spectrum_clean.npy'),images_clean)
 
     # 计算损坏图像的频谱差
     spectrum_diffs=[]
+    skiped=['gaussian_noise', 'impulse_noise',  'shot_noise', 'speckle_noise','contrast']
     for i,dataset_dir in enumerate(tqdm(dataset_setting_crupt.dataset_dir)):
         images_crupt=np.zeros_like(images_clean)
         crupt_name='_'.join(dataset_dir.split('/')[-3:])
+        flag_skip=False
+        for skip_name in skiped:
+            if skip_name in crupt_name:
+                flag_skip=True
+                break
+        if flag_skip:
+            continue
         saved_dir_tmp=os.path.join(saved_dir,crupt_name)
         for j,file_name in enumerate(file_names):
             image_tmp=Image.open(os.path.join(dataset_dir,file_name)).resize([image_shape[1],image_shape[2]])
@@ -181,13 +190,13 @@ def spectrum_pca(dataset_setting_clean,dataset_setting_crupt,file_names,saved_di
     for i in range(spectrum_diffs.shape[1]):
         spectrum_tmp=spectrum_diffs[:,i,...]
         spectrum_tmp=spectrum_tmp.reshape([spectrum_tmp.shape[0],-1])
-        pca=PCA(n_components=0.9).fit(spectrum_tmp)
-        print('PCA {} components:{}'.format(i,pca.components_))
+        pca=PCA(n_components='mle',whiten=True).fit(spectrum_tmp)#'mle'
         print('PCA {} n_components:{}'.format(i,pca.n_components_))
-        print('PCA {} explained_variance_:{}'.format(i,pca.explained_variance_))
-        print('PCA {} mean:{}'.format(i,pca.mean_))
+        print('PCA {} components_shape:{}'.format(i,pca.components_.shape))
+        print('PCA {} explained_variance:{}'.format(i,pca.explained_variance_))
+        print('PCA {} explained_variance_ratio:{}'.format(i,pca.explained_variance_ratio_))
         print('PCA {} noise_variance:{}'.format(i,pca.noise_variance_))
-        joblib.dump(pca, os.path.join(saved_dir,'pca_'+str(i)+'.npy'))
+        joblib.dump(pca, os.path.join(saved_dir,'pca_'+str(i)+'.pkl'))
     
 
 def compare_features(compare_type,dataset_setting_clean,dataset_setting_crupt,file_names,saved_dir):
@@ -340,7 +349,7 @@ def output_names(dir_src):
 设置
 '''
 model_name='resnet50_imagenet'
-num_images=10
+num_images=1000
 os.environ['CUDA_VISIBLE_DEVICES']='0'
 job='pca'
 

@@ -5,6 +5,10 @@ import numpy as np
 import cv2
 from augmentations import dct2img,img2dct
 from scipy.io import loadmat
+import os
+import joblib
+import matplotlib.pyplot as plt
+
 IMAGE_SIZE=224
 
 # noise_Y=np.loadtxt('0.txt')
@@ -142,3 +146,38 @@ img_out.save('3.png')
 # a=a.cuda(2)
 # a.device=torch.device('cuda')
 # print(a)
+
+# dir='./results/resnet50_imagenet_100/pca'
+# cleans=np.load(os.path.join(dir,'spectrum_clean.npy'))
+# cleans_mean=cleans.mean(axis=0)
+
+# for channel in range(3):
+#     pca=joblib.load(os.path.join(dir,'pca_{}.pkl'.format(channel)))
+#     V = pca.components_
+#     V.shape
+
+#     fig, axes = plt.subplots(3,2,figsize=(224,224),subplot_kw = {"xticks":[],"yticks":[]})
+#     for i, ax in enumerate(axes.flat):
+#         if i>=len(V): break
+#         v_tmp=V[i,:].reshape(224,224)
+#         ax.imshow(v_tmp,cmap="gray")
+#         np.savetxt(os.path.join(dir,'Img_pca_{}_{}.txt'.format(channel,i)),v_tmp)
+#     plt.show()
+#     plt.savefig(os.path.join(dir,'Img_pca_{}_{}.png'.format(channel,i)))
+#     plt.close()
+
+#     fig, axes = plt.subplots(3,2,figsize=(224,224),subplot_kw = {"xticks":[],"yticks":[]})
+#     for i, ax in enumerate(axes.flat):
+#         if i>=len(V): break
+#         v_tmp=V[i,:].reshape(224,224)*cleans_mean[channel,...]
+#         ax.imshow(v_tmp,cmap="gray")
+#         np.savetxt(os.path.join(dir,'Img_mean_pca_{}_{}.txt'.format(channel,i)),v_tmp)
+#     plt.show()
+#     plt.savefig(os.path.join(dir,'Img_pca_{}_{}.png'.format(channel,i)))
+#     plt.close()
+
+    
+
+
+
+

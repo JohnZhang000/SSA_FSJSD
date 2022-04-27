@@ -15,14 +15,17 @@
 """Base augmentations operators."""
 
 import enum
+from statistics import variance
 import numpy as np
 from PIL import Image, ImageOps, ImageEnhance
 import cv2
 from scipy.io import loadmat
+import joblib
+import os
 
 # ImageNet code should change this value
-# IMAGE_SIZE = 32
-IMAGE_SIZE = 224
+IMAGE_SIZE = 32
+# IMAGE_SIZE = 224
 
 def int_parameter(level, maxval):
   """Helper function to scale `val` between 0 and maxval .
@@ -170,7 +173,7 @@ noise_Cb[noise_Cb<=0.5]=0
 noise_Cr[noise_Cr>0.5]=1
 noise_Cr[noise_Cr<=0.5]=0
 
-thresh=int(IMAGE_SIZE/3)
+thresh=1#int(IMAGE_SIZE/3)
 noise_Y[:,thresh:]=1
 noise_Y[thresh:,:]=1
 noise_Cb[:,thresh:]=1
@@ -271,12 +274,19 @@ def add_noise_on_spectrum(img_channel,radius,scale,std):
 #   img_out=dct2img(dct,sign)
 #   return img_out
   
-corruptions_mean=loadmat('corruptions.mat')
-corruptions_std=loadmat('corruptions_std.mat')
-corruptions_name=list(corruptions_mean.keys())
-corruptions_name.remove('__header__')
-corruptions_name.remove('__version__')
-corruptions_name.remove('__globals__')
+# corruptions_mean=loadmat('corruptions.mat')
+# corruptions_std=loadmat('corruptions_std.mat')
+# corruptions_name=list(corruptions_mean.keys())
+# corruptions_name.remove('__header__')
+# corruptions_name.remove('__version__')
+# corruptions_name.remove('__globals__')
+dir='./results/resnet50_imagenet_100/pca'
+components=[]
+variances=[]
+for channel in range(3):
+    pca=joblib.load(os.path.join(dir,'pca_{}.pkl'.format(channel)))
+    components.append(pca.components_)
+    variances.append(pca.explained_variance_)
 
 
 def my_spectrum_noiser(pil_img, level):
@@ -285,24 +295,39 @@ def my_spectrum_noiser(pil_img, level):
 
   for i,dct_tmp in enumerate(dct):
 
-    corrupt=corruptions_name[np.random.randint(0,len(corruptions_name))]
-    mean_off=corruptions_mean[corrupt].astype(np.float32)
-    std_off=corruptions_std[corrupt].astype(np.float32)
-    mean_off= cv2.resize(mean_off, dsize=(IMAGE_SIZE, IMAGE_SIZE), interpolation=cv2.INTER_CUBIC)
-    std_off= cv2.resize(std_off, dsize=(IMAGE_SIZE, IMAGE_SIZE), interpolation=cv2.INTER_CUBIC)
-    mean_off=mean_off*np.random.randn()#(np.random.randn(h,w))#*level/100)*#(1+np.random.random())#
-    std_off=std_off*np.random.randn(h,w)*level/10#(1+np.random.random())#(np.random.randn(h,w)*level/100)
-    dct[i,...]=dct_tmp+dct_tmp*mean_off*(1+std_off*3)#dct_tmp*std_off++mean_off*dct_tmp
+    choosed_components=np.random.randint(0,len(components[i]))
+
+    diff=components[i][choosed_components].reshape((224,224))
+    diff=cv2.resize(diff, dsize=(h, w), interpolation=cv2.INTER_CUBIC)
+    dct[i,...]=dct_tmp+diff*dct_tmp*100*np.random.random()*(1+level)/3
   
   img_out=dct2img(dct,sign)
   return img_out
+  
+# def my_spectrum_noiser(pil_img, level):
+#   dct,sign=img2dct(pil_img)
+#   c,h,w=dct.shape
+
+#   for i,dct_tmp in enumerate(dct):
+
+#     corrupt=corruptions_name[np.random.randint(0,len(corruptions_name))]
+#     mean_off=corruptions_mean[corrupt].astype(np.float32)
+#     std_off=corruptions_std[corrupt].astype(np.float32)
+#     mean_off= cv2.resize(mean_off, dsize=(IMAGE_SIZE, IMAGE_SIZE), interpolation=cv2.INTER_CUBIC)
+#     std_off= cv2.resize(std_off, dsize=(IMAGE_SIZE, IMAGE_SIZE), interpolation=cv2.INTER_CUBIC)
+#     mean_off=mean_off*np.random.randn()#(np.random.randn(h,w))#*level/100)*#(1+np.random.random())#
+#     std_off=std_off*np.random.randn(h,w)#*level/10#(1+np.random.random())#(np.random.randn(h,w)*level/100)
+#     dct[i,...]=dct_tmp+dct_tmp*mean_off*(1+std_off)#dct_tmp*std_off++mean_off*dct_tmp
+  
+#   img_out=dct2img(dct,sign)
+#   return img_out
 
 
 
 augmentations = [
-    # autocontrast, equalize, posterize, rotate, solarize, shear_x, shear_y,
-    # translate_x, translate_y,
-    AddImpulseNoise,AddContrast,my_spectrum_noiser
+    autocontrast, equalize, posterize, rotate, solarize, shear_x, shear_y,
+    translate_x, translate_y,
+    AddImpulseNoise,AddContrast#,my_spectrum_noiser
 ]
 
 augmentations_all = [
