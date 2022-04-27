@@ -13,6 +13,10 @@ from sklearn.metrics.pairwise import cosine_similarity
 # from augment_and_mix import augment_and_mix
 from scipy.io import savemat
 from skimage.color import rgb2lab,rgb2ycbcr,rgb2luv,rgb2hsv
+from sklearn.decomposition import PCA #大数据的包实现主成分分析
+import joblib
+
+
 
 def get_vec_sim(arrays1,arrays2):
     assert(2==len(arrays1.shape))
@@ -145,6 +149,45 @@ def compare_spectrum(dataset_setting_clean,dataset_setting_crupt,file_names,save
             my_std[crupt_name+'_c'+str(k)]=images_std[k,...]
     savemat(os.path.join(saved_dir,'corruptions.mat'),my_mat)
     savemat(os.path.join(saved_dir,'corruptions_std.mat'),my_std)
+
+def spectrum_pca(dataset_setting_clean,dataset_setting_crupt,file_names,saved_dir):
+    # 计算干净图像的频谱
+    image_shape=dataset_setting_clean.input_shape
+    image_num=len(file_names)
+    images_clean=np.zeros([image_num,image_shape[0],image_shape[1],image_shape[2]])
+    for i,file_name in enumerate(file_names):
+        image_tmp=Image.open(os.path.join(dataset_setting_clean.dataset_dir,'val',file_name)).resize([image_shape[1],image_shape[2]])
+        image_tmp=cvt_color(image_tmp)
+        images_clean[i,...]=image_tmp#/255.0
+    images_clean=get_spectrum(images_clean)
+
+    # 计算损坏图像的频谱差
+    spectrum_diffs=[]
+    for i,dataset_dir in enumerate(tqdm(dataset_setting_crupt.dataset_dir)):
+        images_crupt=np.zeros_like(images_clean)
+        crupt_name='_'.join(dataset_dir.split('/')[-3:])
+        saved_dir_tmp=os.path.join(saved_dir,crupt_name)
+        for j,file_name in enumerate(file_names):
+            image_tmp=Image.open(os.path.join(dataset_dir,file_name)).resize([image_shape[1],image_shape[2]])
+            image_tmp=cvt_color(image_tmp)
+            images_crupt[j,...]=image_tmp#/255.0
+        images_crupt=get_spectrum(images_crupt)
+        images_diff=(images_crupt-images_clean)/images_clean
+        spectrum_diffs.append(images_diff)
+    spectrum_diffs=np.vstack(spectrum_diffs)
+    np.save(os.path.join(saved_dir,'spectrum_diffs.npy'),spectrum_diffs)
+    spectrum_diffs=np.load(os.path.join(saved_dir,'spectrum_diffs.npy'))
+
+    for i in range(spectrum_diffs.shape[1]):
+        spectrum_tmp=spectrum_diffs[:,i,...]
+        spectrum_tmp=spectrum_tmp.reshape([spectrum_tmp.shape[0],-1])
+        pca=PCA(n_components=0.9).fit(spectrum_tmp)
+        print('PCA {} components:{}'.format(i,pca.components_))
+        print('PCA {} n_components:{}'.format(i,pca.n_components_))
+        print('PCA {} explained_variance_:{}'.format(i,pca.explained_variance_))
+        print('PCA {} mean:{}'.format(i,pca.mean_))
+        print('PCA {} noise_variance:{}'.format(i,pca.noise_variance_))
+        joblib.dump(pca, os.path.join(saved_dir,'pca_'+str(i)+'.npy'))
     
 
 def compare_features(compare_type,dataset_setting_clean,dataset_setting_crupt,file_names,saved_dir):
@@ -297,11 +340,12 @@ def output_names(dir_src):
 设置
 '''
 model_name='resnet50_imagenet'
-num_images=1000
+num_images=10
 os.environ['CUDA_VISIBLE_DEVICES']='0'
+job='pca'
 
 now = time.strftime("%Y-%m-%d-%H_%M_%S",time.localtime(time.time())) 
-saved_dir=os.path.join('./results',model_name+'_'+str(num_images),now)
+saved_dir=os.path.join('./results',model_name+'_'+str(num_images),job)
 if not os.path.exists(saved_dir):
     os.makedirs(saved_dir)
 
@@ -350,7 +394,9 @@ images_selected=images_all[:num_images]
 '''
 输出频谱
 '''
-compare_spectrum(data_setting_clean,data_setting_crupt,images_selected,saved_dir)
+spectrum_pca(data_setting_clean,data_setting_crupt,images_selected,saved_dir)
+
+# compare_spectrum(data_setting_clean,data_setting_crupt,images_selected,saved_dir)
 # compare_spectrum_tc(data_setting_clean,data_setting_crupt,images_selected,saved_dir)
 # compare_features('hog',data_setting_clean,data_setting_crupt,images_selected,saved_dir)
 # compare_features_cnn(model,data_setting_clean,data_setting_crupt,images_selected,saved_dir)
