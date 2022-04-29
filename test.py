@@ -3,6 +3,7 @@ import augmentations
 from augmentations import img2dct,dct2img,AddContrast,AddImpulseNoise,my_spectrum_noiser
 import numpy as np
 import cv2
+import augmentations as aug
 from augmentations import dct2img,img2dct
 from scipy.io import loadmat
 import os
@@ -108,7 +109,7 @@ IMAGE_SIZE=224
 
 
 img=Image.open('n01440764_18.JPEG').resize((IMAGE_SIZE,IMAGE_SIZE))
-
+aug.THRESH=0.5
 # img_out=my_spectrum_noiser(img,3)
 # img_out=spectrum_mix(img)
 level=np.random.randint(0,10)

@@ -25,6 +25,8 @@ import os
 
 # ImageNet code should change this value
 IMAGE_SIZE = 32
+IMPULSE_THRESH=1.0
+CONTRAST_SCALE=1.5
 # IMAGE_SIZE = 224
 
 def int_parameter(level, maxval):
@@ -158,28 +160,31 @@ def AddSaltPepperNoise(pil_img, level):
 
 from scipy.fftpack import dct,idct
 
-noise_Y=np.loadtxt('0.txt')
-noise_Cb=np.loadtxt('1.txt')
-noise_Cr=np.loadtxt('1.txt')
+# noise_Y=np.loadtxt('0.txt')
+# noise_Cb=np.loadtxt('1.txt')
+# noise_Cr=np.loadtxt('2.txt')
 
-noise_Y = cv2.resize(noise_Y, dsize=(IMAGE_SIZE, IMAGE_SIZE), interpolation=cv2.INTER_CUBIC)
-noise_Cb = cv2.resize(noise_Cb, dsize=(IMAGE_SIZE, IMAGE_SIZE), interpolation=cv2.INTER_CUBIC)
-noise_Cr = cv2.resize(noise_Cr, dsize=(IMAGE_SIZE, IMAGE_SIZE), interpolation=cv2.INTER_CUBIC)
+# noise_Y = cv2.resize(noise_Y, dsize=(IMAGE_SIZE, IMAGE_SIZE), interpolation=cv2.INTER_CUBIC)
+# noise_Cb = cv2.resize(noise_Cb, dsize=(IMAGE_SIZE, IMAGE_SIZE), interpolation=cv2.INTER_CUBIC)
+# noise_Cr = cv2.resize(noise_Cr, dsize=(IMAGE_SIZE, IMAGE_SIZE), interpolation=cv2.INTER_CUBIC)
 
-noise_Y[noise_Y>0.5]=1
-noise_Y[noise_Y<=0.5]=0
-noise_Cb[noise_Cb>0.5]=1
-noise_Cb[noise_Cb<=0.5]=0
-noise_Cr[noise_Cr>0.5]=1
-noise_Cr[noise_Cr<=0.5]=0
+# thresh_y=0.5
+# thresh_cb=0.25
+# thresh_cr=0.25
+# noise_Y[noise_Y>thresh_y]=1
+# noise_Y[noise_Y<=thresh_y]=0
+# noise_Cb[noise_Cb>thresh_cb]=1
+# noise_Cb[noise_Cb<=thresh_cb]=0
+# noise_Cr[noise_Cr>thresh_cr]=1
+# noise_Cr[noise_Cr<=thresh_cr]=0
 
-thresh=1#int(IMAGE_SIZE/3)
-noise_Y[:,thresh:]=1
-noise_Y[thresh:,:]=1
-noise_Cb[:,thresh:]=1
-noise_Cb[thresh:,:]=1
-noise_Cr[:,thresh:]=1
-noise_Cr[thresh:,:]=1
+# thresh=int(IMAGE_SIZE/3)
+# noise_Y[:,thresh:]=1
+# noise_Y[thresh:,:]=1
+# noise_Cb[:,thresh:]=1
+# noise_Cb[thresh:,:]=1
+# noise_Cr[:,thresh:]=1
+# noise_Cr[thresh:,:]=1
 
 def dct2 (block):
     return dct(dct(block.T, norm = 'ortho').T, norm = 'ortho')
@@ -220,10 +225,22 @@ def dct2img(dct_imgs,sign_dct):
 def AddImpulseNoise(pil_img, level):
     dct,sign=img2dct(pil_img)
 
+    _,H,W=dct.shape
+    mask=np.ones((H,W))
+    x, y = np.ogrid[:H, :W]
+    r2= x*x+y*y
+    r_thresh=IMPULSE_THRESH#0.5#(level+1)/20
+    # print(r_thresh)
+    circmask = r2 <= r_thresh*H*r_thresh*W
+    mask[circmask] = 0
+    noise_Y=mask
+    noise_Cb=mask
+    noise_Cr=mask
+
     dct_noise=dct.copy()
-    dct_noise[0,...]=noise_Y*dct_noise[0,...]*np.random.randn(IMAGE_SIZE,IMAGE_SIZE)*np.random.random()*level/2
-    dct_noise[1,...]=noise_Y*dct_noise[1,...]*np.random.randn(IMAGE_SIZE,IMAGE_SIZE)*np.random.random()*level/2
-    dct_noise[2,...]=noise_Y*dct_noise[2,...]*np.random.randn(IMAGE_SIZE,IMAGE_SIZE)*np.random.random()*level/2
+    dct_noise[0,...]=noise_Y*dct_noise[0,...]*np.random.randn(H,W)*np.random.random()*level/2
+    dct_noise[1,...]=noise_Cb*dct_noise[1,...]*np.random.randn(H,W)*np.random.random()*level/2
+    dct_noise[2,...]=noise_Cr*dct_noise[2,...]*np.random.randn(H,W)*np.random.random()*level/2
     dct=dct+dct_noise
 
     img_out=dct2img(dct,sign)
@@ -235,7 +252,7 @@ def AddContrast(pil_img, level):
     dct0=dct[:,0,0]
     scale_level=np.random.random()*1.5
     dct=dct*scale_level
-    dct[:,0,0]=dct0*(1-np.random.random()*0.01)
+    dct[:,0,0]=dct0#*(1-np.random.random()*0.01)
     # print(scale_level)
 
     img_out=dct2img(dct,sign)
@@ -290,19 +307,43 @@ for channel in range(3):
 
 
 def my_spectrum_noiser(pil_img, level):
-  dct,sign=img2dct(pil_img)
-  c,h,w=dct.shape
+    dct,sign=img2dct(pil_img)
+    _,H,W=dct.shape
 
-  for i,dct_tmp in enumerate(dct):
+    # add contrast
+    dct0=dct[:,0,0]
+    dct=dct*np.random.random()*CONTRAST_SCALE
+    dct[:,0,0]=dct0
 
-    choosed_components=np.random.randint(0,len(components[i]))
+    # add noise
+    mask=np.ones((H,W))
+    x, y = np.ogrid[:H, :W]
+    r2= x*x+y*y
+    r_thresh=IMPULSE_THRESH
+    circmask = r2 <= r_thresh*H*r_thresh*W
+    mask[circmask] = 0
 
-    diff=components[i][choosed_components].reshape((224,224))
-    diff=cv2.resize(diff, dsize=(h, w), interpolation=cv2.INTER_CUBIC)
-    dct[i,...]=dct_tmp+diff*dct_tmp*100*np.random.random()*(1+level)/3
+    dct[0,...]=dct[0,...]*(1+mask*np.random.randn(H,W)*np.random.random()*level/2)
+    dct[1,...]=dct[1,...]*(1+mask*np.random.randn(H,W)*np.random.random()*level/2)
+    dct[2,...]=dct[2,...]*(1+mask*np.random.randn(H,W)*np.random.random()*level/2)
+
+    img_out=dct2img(dct,sign)
+    return img_out
+
+# def my_spectrum_noiser(pil_img, level):
+#   dct,sign=img2dct(pil_img)
+#   c,h,w=dct.shape
+
+#   for i,dct_tmp in enumerate(dct):
+
+#     choosed_components=np.random.randint(0,len(components[i]))
+
+#     diff=components[i][choosed_components].reshape((224,224))
+#     diff=cv2.resize(diff, dsize=(h, w), interpolation=cv2.INTER_CUBIC)
+#     dct[i,...]=dct_tmp+diff*dct_tmp*100*np.random.random()*(1+level)/3
   
-  img_out=dct2img(dct,sign)
-  return img_out
+#   img_out=dct2img(dct,sign)
+#   return img_out
   
 # def my_spectrum_noiser(pil_img, level):
 #   dct,sign=img2dct(pil_img)
@@ -327,7 +368,8 @@ def my_spectrum_noiser(pil_img, level):
 augmentations = [
     autocontrast, equalize, posterize, rotate, solarize, shear_x, shear_y,
     translate_x, translate_y,
-    AddImpulseNoise,AddContrast#,my_spectrum_noiser
+    # AddImpulseNoise,AddContrast,
+    my_spectrum_noiser
 ]
 
 augmentations_all = [

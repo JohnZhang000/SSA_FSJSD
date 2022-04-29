@@ -150,6 +150,39 @@ def compare_spectrum(dataset_setting_clean,dataset_setting_crupt,file_names,save
     savemat(os.path.join(saved_dir,'corruptions.mat'),my_mat)
     savemat(os.path.join(saved_dir,'corruptions_std.mat'),my_std)
 
+def compare_spectrum_pixel(dataset_setting_clean,dataset_setting_crupt,file_names,saved_dir):
+    # 计算干净图像的频谱
+    image_shape=dataset_setting_clean.input_shape
+    image_num=len(file_names)
+    images_clean=np.zeros([image_num,image_shape[0],image_shape[1],image_shape[2]])
+    for i,file_name in enumerate(file_names):
+        image_tmp=Image.open(os.path.join(dataset_setting_clean.dataset_dir,'val',file_name)).resize([image_shape[1],image_shape[2]])
+        image_tmp=cvt_color(image_tmp)
+        images_clean[i,...]=image_tmp#/255.0
+    images_clean_spectrum=get_spectrum(images_clean)
+
+    # 计算损坏图像的频谱差
+    my_mat={}
+    my_std={}
+    for i,dataset_dir in enumerate(tqdm(dataset_setting_crupt.dataset_dir)):
+        images_crupt=np.zeros_like(images_clean)
+        crupt_name='_'.join(dataset_dir.split('/')[-3:])
+        saved_dir_tmp=os.path.join(saved_dir,crupt_name)
+        for j,file_name in enumerate(file_names):
+            image_tmp=Image.open(os.path.join(dataset_dir,file_name)).resize([image_shape[1],image_shape[2]])
+            image_tmp=cvt_color(image_tmp)
+            images_crupt[j,...]=image_tmp#/255.0
+        images_diff=images_crupt-images_clean
+        images_diff=get_spectrum(images_diff)
+        images_std=images_diff.std(axis=0)/(images_clean_spectrum.mean(axis=0)+g.epsilon)
+        images_mean=images_diff.mean(axis=0)/(images_clean_spectrum.mean(axis=0)+g.epsilon)
+
+        for k in range(images_mean.shape[0]):
+            my_mat[crupt_name+'_c'+str(k)]=images_mean[k,...]
+            my_std[crupt_name+'_c'+str(k)]=images_std[k,...]
+    savemat(os.path.join(saved_dir,'corruptions.mat'),my_mat)
+    savemat(os.path.join(saved_dir,'corruptions_std.mat'),my_std)
+
 def spectrum_pca(dataset_setting_clean,dataset_setting_crupt,file_names,saved_dir):
     # 计算干净图像的频谱
     image_shape=dataset_setting_clean.input_shape
@@ -349,9 +382,9 @@ def output_names(dir_src):
 设置
 '''
 model_name='resnet50_imagenet'
-num_images=1000
+num_images=100
 os.environ['CUDA_VISIBLE_DEVICES']='0'
-job='pca'
+job='pixel'
 
 now = time.strftime("%Y-%m-%d-%H_%M_%S",time.localtime(time.time())) 
 saved_dir=os.path.join('./results',model_name+'_'+str(num_images),job)
@@ -403,9 +436,9 @@ images_selected=images_all[:num_images]
 '''
 输出频谱
 '''
-spectrum_pca(data_setting_clean,data_setting_crupt,images_selected,saved_dir)
+# spectrum_pca(data_setting_clean,data_setting_crupt,images_selected,saved_dir)
 
-# compare_spectrum(data_setting_clean,data_setting_crupt,images_selected,saved_dir)
+compare_spectrum_pixel(data_setting_clean,data_setting_crupt,images_selected,saved_dir)
 # compare_spectrum_tc(data_setting_clean,data_setting_crupt,images_selected,saved_dir)
 # compare_features('hog',data_setting_clean,data_setting_crupt,images_selected,saved_dir)
 # compare_features_cnn(model,data_setting_clean,data_setting_crupt,images_selected,saved_dir)

@@ -155,6 +155,16 @@ parser.add_argument(
     type=int,
     default=16,
     help='Number of pre-fetching threads.')
+parser.add_argument(
+    '--imp_thresh',
+    type=float,
+    default=0.5,
+    help='r thresh for impulse noise')
+parser.add_argument(
+    '--contrast_scale',
+    type=float,
+    default=1.5,
+    help='r thresh for impulse noise')
 
 # distributed training parameters
 # parser.add_argument('--world_size', default=1, type=int,
@@ -166,6 +176,8 @@ parser.add_argument(
 
 
 args = parser.parse_args()
+augmentations.IMPULSE_THRESH = args.imp_thresh
+augmentations.CONTRAST_SCALE = args.contrast_scale
 
 CORRUPTIONS = [
     'defocus_blur', 'glass_blur', 'motion_blur', 'zoom_blur',
@@ -176,6 +188,23 @@ CORRUPTIONS = [
 ]
 
 
+class TVLoss(nn.Module):
+    def __init__(self,TVLoss_weight=1):
+        super(TVLoss,self).__init__()
+        self.TVLoss_weight = TVLoss_weight
+
+    def forward(self,x):
+        batch_size = x.size()[0]
+        h_x = x.size()[2]
+        w_x = x.size()[3]
+        count_h = self._tensor_size(x[:,:,1:,:])
+        count_w = self._tensor_size(x[:,:,:,1:])
+        h_tv = torch.pow((x[:,:,1:,:]-x[:,:,:h_x-1,:]),2).sum()
+        w_tv = torch.pow((x[:,:,:,1:]-x[:,:,:,:w_x-1]),2).sum()
+        return self.TVLoss_weight*2*(h_tv/count_h+w_tv/count_w)/batch_size
+
+    def _tensor_size(self,t):
+        return t.size()[1]*t.size()[2]*t.size()[3]
 def get_lr(step, total_steps, lr_max, lr_min):
   """Compute learning rate according to cosine annealing schedule."""
   return lr_min + (lr_max - lr_min) * 0.5 * (1 +
@@ -696,10 +725,12 @@ def get_preds_and_features(model,images):
       features_tmp[output.device].append(output)
 
     handles=[]
-    handles.append(model.module.features.register_forward_hook(hook))
     # for module in model.module.features:
     #   if 'Conv2d' in module._get_name():
     #       handles.append(module.register_forward_hook(hook))
+    #       break
+    handles.append(model.module.features.register_forward_hook(hook))
+
 
     preds = model(images)
     for handle in handles:
@@ -743,10 +774,14 @@ def my_loss(logits_all,features_all,targets):
     features_clean=features_all[0][0].reshape(len(targets),-1)
     features_aug1=features_all[1][0].reshape(len(targets),-1)
     features_aug2=features_all[2][0].reshape(len(targets),-1)
+    # features_clean=features_all[0][1].reshape(len(targets),-1)
+    # features_aug1=features_all[1][1].reshape(len(targets),-1)
+    # features_aug2=features_all[2][1].reshape(len(targets),-1)
     logger.debug('features_clean: {} {} {} features_aug1: {} {} {} features_aug2: {} {} {}'.format(features_clean.min(),features_clean.max(),features_clean.mean(),
                                                                                                  features_aug1.min(),features_aug1.max(),features_aug1.mean(),
                                                                                                  features_aug2.min(),features_aug2.max(),features_aug2.mean()))
 
+    # features_clean_mean=features_clean
     features_clean_mean=torch.mean(features_clean,dim=0).reshape(1,-1)
     features_clean_mean=features_clean_mean.repeat_interleave(len(targets),dim=0)
     logger.debug('features_clean_mean: {} {} {}'.format(features_clean_mean.min(),features_clean_mean.max(),features_clean_mean.mean()))
@@ -778,6 +813,24 @@ def my_loss(logits_all,features_all,targets):
             logits_aug1, dim=1), F.softmax(
                 logits_aug2, dim=1)
     p_mixture = torch.clamp((p_clean + p_aug1 + p_aug2) / 3., 1e-7, 1).log()
+
+    # _, pred_aug1 = torch.max(p_aug1, 1)
+    # _, pred_aug2 = torch.max(p_aug2, 1)
+    # correct_aug1 = (pred_aug1 == targets)
+    # correct_aug2 = (pred_aug2 == targets)
+    target_onehot=torch.zeros_like(p_aug1).scatter_(1, targets.reshape(-1,1), 1)
+    target_logits1=p_aug1*target_onehot
+    target_logits1=target_logits1.sum(axis=1)
+    topk_aug1=target_logits1.topk(int(0.75*p_aug1.shape[0]),dim=0)[0][-1]
+    correct_aug1=target_logits1>topk_aug1
+    target_logits2=p_aug2*target_onehot
+    target_logits2=target_logits2.sum(axis=1)
+    topk_aug2=target_logits2.topk(int(0.75*p_aug2.shape[0]),dim=0)[0][-1]
+    correct_aug2=target_logits2>topk_aug2
+    
+    scale_epoch=np.exp(min(0,60-epoch))
+    scale_aug1=scale_aug1*((~correct_aug1)*scale_epoch+correct_aug1)
+    scale_aug2=scale_aug2*((~correct_aug2)*scale_epoch+correct_aug2)
 
     kl_div_aug1=F.kl_div(p_mixture, p_aug1, reduction='none').mean(axis=-1)
     kl_div_aug2=F.kl_div(p_mixture, p_aug2, reduction='none').mean(axis=-1)
@@ -812,6 +865,13 @@ def my_loss(logits_all,features_all,targets):
 
     # loss for features
     loss_feature=0.
+    # loss_tv=TVLoss()
+    # features_clean_conv=features_all[0][0]
+    # features_aug1_conv=features_all[1][0]
+    # features_aug2_conv=features_all[2][0]
+    # loss_feature=loss_tv(features_clean_conv)+loss_tv(features_aug1_conv)+loss_tv(features_aug2_conv)
+
+
     # loss_nxt = NTXentLoss()
     # # loss_nxt = pml_dist.DistributedLossWrapper(loss_nxt)
     # loss_jsd=loss_nxt(torch.vstack(logits_all), lables)
@@ -861,7 +921,7 @@ def my_loss(logits_all,features_all,targets):
 
 if __name__ == '__main__':
 
-  os.environ['CUDA_VISIBLE_DEVICES']='1'
+  # os.environ['CUDA_VISIBLE_DEVICES']='0'
   '''
   初始化日志系统
   '''
@@ -883,6 +943,8 @@ if __name__ == '__main__':
   logger.addHandler(ch)
   logger.addHandler(fh)
   # g.setup_seed(0)
+
+  logger.info(args)
 
   writer = SummaryWriter(saved_dir)
 
