@@ -1,4 +1,7 @@
-#python imagenet_my.py -b 64
-python imagenet_my.py -b 64 --with_NTXentLoss
-
-# OMP_NUM_THREADS=1 python -m torch.distributed.launch --nproc_per_node=4 imagenet_my.py -e 2 --with_NTXentLoss
+python cifar_my.py -m allconv
+python cifar_my.py -m wrn
+python cifar_my.py -m resnext -e 200
+python cifar_my.py -m densenet -e 200 -wd 0.0001
+python cifar_my.py -m allconv --no_fsim
+python cifar_my.py -m allconv --no_topk
+python cifar_my.py -m allconv --no_timei

@@ -21,18 +21,13 @@ Example usage:
   `python cifar.py`
 """
 from __future__ import print_function
-from distutils.debug import DEBUG
 
-# import misc
 import argparse
 import os
-# from sched import scheduler
 import shutil
 import time
-from PIL import Image
 
 import augmentations
-from augmentations import dct2img,img2dct
 from models.allconv import AllConvNet
 import numpy as np
 from models.third_party.ResNeXt_DenseNet.models.densenet import densenet
@@ -47,9 +42,6 @@ from torchvision import datasets
 from torchvision import transforms
 import logging
 import general as g
-# import albumentations
-# from pytorch_metric_learning.losses import NTXentLoss
-# from pytorch_metric_learning.utils import distributed as pml_dist
 import socket
 from torch.utils.tensorboard import SummaryWriter
 
@@ -109,7 +101,7 @@ parser.add_argument(
     '--mixture-depth',
     default=-1,
     type=int,
-    help='Depth of augmentation chains. -1 denotes stochastic depth in [1, 3]')
+    help='Depth of augmentation chains. -1 denotes stochastic depth in [1, 10]')
 parser.add_argument(
     '--aug-severity',
     default=3,
@@ -136,18 +128,13 @@ parser.add_argument(
     '--resume',
     '-r',
     type=str,
-    default='',# ./snapshots/allconv_checkpoint.pth.tar #'./results/2022-04-04-23_34_11/checkpoint.pth.tar',#
+    default='',
     help='Checkpoint path for resume / test.')
 parser.add_argument('--evaluate', action='store_true', help='Eval only.')
 parser.add_argument(
     '--print-freq',
     type=int,
     default=50,
-    help='Training loss print frequency (batches).')
-parser.add_argument(
-    '--eval-crpt',
-    type=int,
-    default=10,
     help='Training loss print frequency (batches).')
 # Acceleration
 parser.add_argument(
@@ -172,24 +159,30 @@ parser.add_argument(
     help='r thresh for impulse noise')
 parser.add_argument(
     '--topk_epoch',
-    type=int,
-    default=60,
+    type=float,
+    default=0.6,
     help='r thresh for impulse noise')
-
-# distributed training parameters
-# parser.add_argument('--world_size', default=1, type=int,
-#                     help='number of distributed processes')
-# parser.add_argument('--local_rank', default=-1, type=int)
-# parser.add_argument('--dist_on_itp', action='store_true')
-# parser.add_argument('--dist_url', default='env://',
-#                     help='url used to set up distributed training')
-
+parser.add_argument(
+    '--no_fsim',
+    '-nfs',
+    action='store_true',
+    help='Turn off feature similiarity loss.')
+parser.add_argument(
+    '--no_topk',
+    '-ntk',
+    action='store_true',
+    help='Turn off topk loss.')
+parser.add_argument(
+    '--no_timei',
+    '-nti',
+    action='store_true',
+    help='Turn off time invariant loss.')
 
 args = parser.parse_args()
 augmentations.IMPULSE_THRESH = args.imp_thresh
 augmentations.CONTRAST_SCALE = args.contrast_scale
 TOPK=args.topk
-TOPk_EPOCH=args.topk_epoch
+TOPk_EPOCH=int(args.topk_epoch*args.epochs)
 
 CORRUPTIONS = [
     'defocus_blur', 'glass_blur', 'motion_blur', 'zoom_blur',
@@ -200,71 +193,10 @@ CORRUPTIONS = [
 ]
 
 
-class TVLoss(nn.Module):
-    def __init__(self,TVLoss_weight=1):
-        super(TVLoss,self).__init__()
-        self.TVLoss_weight = TVLoss_weight
-
-    def forward(self,x):
-        batch_size = x.size()[0]
-        h_x = x.size()[2]
-        w_x = x.size()[3]
-        count_h = self._tensor_size(x[:,:,1:,:])
-        count_w = self._tensor_size(x[:,:,:,1:])
-        h_tv = torch.pow((x[:,:,1:,:]-x[:,:,:h_x-1,:]),2).sum()
-        w_tv = torch.pow((x[:,:,:,1:]-x[:,:,:,:w_x-1]),2).sum()
-        return self.TVLoss_weight*2*(h_tv/count_h+w_tv/count_w)/batch_size
-
-    def _tensor_size(self,t):
-        return t.size()[1]*t.size()[2]*t.size()[3]
 def get_lr(step, total_steps, lr_max, lr_min):
   """Compute learning rate according to cosine annealing schedule."""
   return lr_min + (lr_max - lr_min) * 0.5 * (1 +
                                              np.cos(step / total_steps * np.pi))
-
-def add_noise_on_spectrum(imgs_spectrum):
-  # print('r:{} s:{}'.format(radius,scale))
-  c,h,w=imgs_spectrum.shape
-  for i,img_channel in enumerate(imgs_spectrum):
-    low=1
-    high=int(h/3)
-    radius=np.random.uniform(low,high)
-    scale=np.random.uniform()
-    std=np.random.uniform()
-
-
-    mask=np.ones_like(img_channel)*scale
-    mask+=np.random.randn(h,w)*scale*std
-
-    # H,W=img_channel.shape
-    x, y = np.ogrid[:h, :w]
-    r2= x*x+y*y
-    circmask = r2 <= radius * radius
-    mask[circmask] = 0
-
-    adder=1 if np.random.uniform() < 0.5 else -1
-    imgs_spectrum[i,...]=img_channel*(1+adder*mask)
-  return imgs_spectrum
-
-def spectrum_mix(pil_img, preprocess):
-  dct,sign=img2dct(pil_img)
-
-  ws = np.float32(np.random.dirichlet([1] * args.mixture_width))
-  m = np.float32(np.random.beta(1, 1))
-
-  mix = np.zeros_like(dct)
-  for i in range(args.mixture_width):
-    dct_aug = dct.copy()
-    depth = args.mixture_depth if args.mixture_depth > 0 else np.random.randint(1, 10)
-    for _ in range(depth):
-      image_aug = add_noise_on_spectrum(dct_aug)
-    # Preprocessing commutes since all coefficients are convex
-    mix += ws[i] * image_aug
-  # mix = (1 - m) * dct + m * mix
-  img_out=dct2img(mix,sign)
-  img_out=preprocess(img_out)
-  return img_out
-
 
 
 def aug(image, preprocess):
@@ -296,9 +228,6 @@ def aug(image, preprocess):
     mix += ws[i] * preprocess(image_aug)
 
   mixed = (1 - m) * preprocess(image) + m * mix
-  # mixed = mix#np.array(augmentations.my_spectrum_noiser(image,np.random.randint(1, 10)))/255.0
-  # mixed=Image.fromarray(np.uint8(mixed*255))
-  # mixed=preprocess(mixed)
   return mixed
 
 
@@ -317,38 +246,18 @@ class AugMixDataset(torch.utils.data.Dataset):
     else:
       im_tuple = (self.preprocess(x), aug(x, self.preprocess),
                   aug(x, self.preprocess))
-      # im_tuple = (self.preprocess(x), spectrum_mix(x, self.preprocess),
-      #       spectrum_mix(x, self.preprocess))
       return im_tuple, y
 
   def __len__(self):
     return len(self.dataset)
 
-class My_AugMixDataset(torch.utils.data.Dataset):
-  """Dataset wrapper to perform AugMix augmentation."""
-
-  def __init__(self, dataset, preprocess, no_jsd=False):
-    self.dataset = dataset
-    self.preprocess = preprocess
-    self.no_jsd = no_jsd
-    self.len=self.__len__()
-
-  def __getitem__(self, i):
-    x, y = self.dataset[i]
-    if self.no_jsd:
-      return aug(x, self.preprocess), y
-    else:
-      x_neg, y_neg = self.dataset[np.random.randint(0,self.len)]
-      while(y_neg==y):
-        x_neg, y_neg = self.dataset[np.random.randint(0,self.len)]
-      im_tuple = (self.preprocess(x), aug(x, self.preprocess),
-                  self.preprocess(x_neg))
-      y_tuple=(y,y,y_neg)
-      return im_tuple, y_tuple
-
-  def __len__(self):
-    return len(self.dataset)
-
+def select_topk(p_y,y):
+    target_onehot=torch.zeros_like(p_y).scatter_(1, y.reshape(-1,1), 1)
+    target_logits=torch.sum(p_y*target_onehot,axis=1)
+    n_correct=torch.sum((target_logits>0.5))
+    topk_aug1=target_logits.topk(int(TOPK*(len(y)-n_correct)+n_correct),dim=0)[0][-1]
+    topk=target_logits>topk_aug1
+    return topk
 
 def train(net, train_loader, optimizer, scheduler):
   """Train for one epoch."""
@@ -357,47 +266,58 @@ def train(net, train_loader, optimizer, scheduler):
   for i, (images, targets) in enumerate(train_loader):
     optimizer.zero_grad()
 
-    # images = images.cuda()
-    # targets_pos = targets[0].cuda()
-    # targets_aug = targets[1].cuda()
-    # targets_neg = targets[2].cuda()
-    # logits = net(images)
     logits_clean,features_clean=get_preds_and_features(net,images[0].cuda())
     logits_aug1,features_aug1=get_preds_and_features(net,images[1].cuda())
     logits_aug2,features_aug2=get_preds_and_features(net,images[2].cuda())
+    
+    targets=targets.cuda()
+    # loss for pred
+    n_img=len(targets)
+    loss_pred = F.cross_entropy(logits_clean, targets)
 
-    # loss = F.cross_entropy(logits, targets)
-    logits_all=[logits_clean, logits_aug1, logits_aug2]
-    features_all=[features_clean,features_aug1,features_aug2]
-    targets_all=targets.cuda()#[targets_pos,targets_aug,targets_neg]
-    loss_pred,loss_jsd,loss_feature = my_loss(logits_all,features_all,targets_all)
-    loss=loss_pred+loss_jsd+loss_feature
+    # loss for jsd
+    loss_jsd=0.
+    p_clean, p_aug1, p_aug2 = F.softmax(
+        logits_clean, dim=1), F.softmax(
+            logits_aug1, dim=1), F.softmax(
+                logits_aug2, dim=1)
+    p_mixture = torch.clamp((p_clean + p_aug1 + p_aug2) / 3., 1e-7, 1).log()
 
-    # if args.no_jsd:
-    #   images = images.cuda()
-    #   targets = targets.cuda()
-    #   logits = net(images)
-    #   loss = F.cross_entropy(logits, targets)
-    # else:
-    #   images_all = torch.cat(images, 0).cuda()
-    #   targets = targets.cuda()
-    #   logits_all = net(images_all)
-    #   logits_clean, logits_aug1, logits_aug2 = torch.split(
-    #       logits_all, images[0].size(0))
+    # with feature similarity
+    if not args.no_fsim:
+      features_clean=features_clean.reshape(n_img,-1)
+      features_aug1=features_aug1.reshape(n_img,-1)
+      features_aug2=features_aug2.reshape(n_img,-1)
 
-    #   # Cross-entropy is only computed on clean images
-    #   loss = F.cross_entropy(logits_clean, targets)
+      features_clean_mean=torch.mean(features_clean,dim=0).reshape(1,-1).repeat_interleave(n_img,dim=0)
+      sim_aug1=F.cosine_similarity(features_clean_mean,features_aug1,axis=-1).cuda()
+      sim_aug2=F.cosine_similarity(features_clean_mean,features_aug2,axis=-1).cuda()
+      scale_aug1=torch.exp((sim_aug1-1)*(sim_aug1-1))
+      scale_aug2=torch.exp((sim_aug2-1)*(sim_aug2-1))
 
-    #   p_clean, p_aug1, p_aug2 = F.softmax(
-    #       logits_clean, dim=1), F.softmax(
-    #           logits_aug1, dim=1), F.softmax(
-    #               logits_aug2, dim=1)
+      if not args.no_topk:
+        # with topk
+        topk_aug1=select_topk(p_aug1,targets)
+        topk_aug2=select_topk(p_aug2,targets)
+        if not args.no_timei:
+          # with time invariant
+          scale_epoch=np.exp(min(0,TOPk_EPOCH-epoch))
+        else:
+          scale_epoch=1
+        scale_aug1=scale_aug1*((~topk_aug1)*scale_epoch+topk_aug1)
+        scale_aug2=scale_aug2*((~topk_aug2)*scale_epoch+topk_aug2)
 
-    #   # Clamp mixture distribution to avoid exploding KL divergence
-    #   p_mixture = torch.clamp((p_clean + p_aug1 + p_aug2) / 3., 1e-7, 1).log()
-    #   loss += 12 * (F.kl_div(p_mixture, p_clean, reduction='batchmean') +
-    #                 F.kl_div(p_mixture, p_aug1, reduction='batchmean') +
-    #                 F.kl_div(p_mixture, p_aug2, reduction='batchmean')) / 3.
+      kl_div_aug1=scale_aug1*F.kl_div(p_mixture, p_aug1, reduction='none').mean(axis=-1)
+      kl_div_aug2=scale_aug2*F.kl_div(p_mixture, p_aug2, reduction='none').mean(axis=-1)
+    else:
+      kl_div_aug1=F.kl_div(p_mixture, p_aug1, reduction='none').mean(axis=-1)
+      kl_div_aug2=F.kl_div(p_mixture, p_aug2, reduction='none').mean(axis=-1)
+
+    loss_jsd = 12 * (F.kl_div(p_mixture, p_clean, reduction='batchmean') +
+                  torch.mean(kl_div_aug1) +
+                  torch.mean(kl_div_aug2)) / 3.
+
+    loss=loss_pred+loss_jsd
 
     loss.backward()
     lr=optimizer.param_groups[0]['lr']
@@ -405,22 +325,16 @@ def train(net, train_loader, optimizer, scheduler):
     scheduler.step()
     loss_ema = loss_ema * 0.9 + float(loss) * 0.1
     if i % args.print_freq == 0:
-      # logger.info('Train Loss {:.3f}'.format(loss_ema))
       writer.add_scalar('Lr',lr,epoch*len(train_loader)+i)
       writer.add_scalar('Loss/Train Loss',loss_ema,epoch*len(train_loader)+i)
       writer.add_scalar('Loss/Loss_sum',loss,epoch*len(train_loader)+i)
       writer.add_scalar('Loss/Loss_pred',loss_pred,epoch*len(train_loader)+i)
       writer.add_scalar('Loss/Loss_jsd',loss_jsd,epoch*len(train_loader)+i)
-      writer.add_scalar('Loss/Loss_feature',loss_feature,epoch*len(train_loader)+i)
 
-      for tag, value in net.named_parameters():
-        tag = tag.replace('.', '/')
-        writer.add_histogram(tag, value.data.cpu().numpy(), epoch*len(train_loader)+i)
-        writer.add_histogram(tag+'/grad', value.grad.data.cpu().numpy(), epoch*len(train_loader)+i)
-
-
-
-
+      # for tag, value in net.named_parameters():
+      #   tag = tag.replace('.', '/')
+      #   writer.add_histogram(tag, value.data.cpu().numpy(), epoch*len(train_loader)+i)
+      #   writer.add_histogram(tag+'/grad', value.grad.data.cpu().numpy(), epoch*len(train_loader)+i)
   return loss_ema
 
 
@@ -478,7 +392,6 @@ def accuracy(output, target, topk=(1,)):
 
 def test_c(net, test_data, base_path):
   """Evaluate network on given corrupted dataset."""
-  # corruption_accs = []
   corruption_acc1s = []
   corruption_acc5s = []
   for corruption in CORRUPTIONS:
@@ -493,10 +406,6 @@ def test_c(net, test_data, base_path):
         num_workers=args.num_workers,
         pin_memory=False)
 
-    # test_loss, test_acc = test(net, test_loader)
-    # corruption_accs.append(test_acc)
-    # print('{}\n\tTest Loss {:.3f} | Test Error {:.3f}'.format(
-    # corruption, test_loss, 100 - 100. * test_acc))
     acc1, acc5 = test_my(net, test_loader_c)
     corruption_acc1s.append(acc1)
     corruption_acc5s.append(acc5)
@@ -507,12 +416,9 @@ def test_c(net, test_data, base_path):
 
 
   return np.mean(corruption_acc1s),np.mean(corruption_acc5s)
-  # print('15* Mean Corruption Error@1 {:.3f}'.format(100-100*np.mean(corruption_accs[4:])))
-  # return np.mean(corruption_accs)
 
 
 def main():
-  # misc.init_distributed_mode(args)
   torch.manual_seed(1)
   np.random.seed(1)
 
@@ -548,20 +454,8 @@ def main():
     num_classes = 100
 
   train_data = AugMixDataset(train_data, preprocess, args.no_jsd)
-
-  # if True:  # args.distributed:
-  #     num_tasks = misc.get_world_size()
-  #     global_rank = misc.get_rank()
-  #     sampler_train = torch.utils.data.DistributedSampler(
-  #         train_data, num_replicas=num_tasks, rank=global_rank, shuffle=True
-  #     )
-  #     sampler_test = torch.utils.data.DistributedSampler(
-  #         test_data, num_replicas=num_tasks, rank=global_rank, shuffle=True
-  #     )
-  #     print("Sampler_train = %s" % str(sampler_train))
   train_loader = torch.utils.data.DataLoader(
       train_data,
-      # sampler=sampler_train,
       batch_size=args.batch_size,
       shuffle=True,
       num_workers=args.num_workers,
@@ -569,7 +463,6 @@ def main():
 
   test_loader = torch.utils.data.DataLoader(
       test_data,
-      # sampler=sampler_test,
       batch_size=args.eval_batch_size,
       shuffle=False,
       num_workers=args.num_workers,
@@ -595,9 +488,6 @@ def main():
   # Distribute model across all visible GPUs
   net = torch.nn.DataParallel(net).cuda()
   cudnn.benchmark = True
-  # if args.distributed:
-  #   net = torch.nn.parallel.DistributedDataParallel(net, device_ids=args.gpu, find_unused_parameters=True)
-    # model_without_ddp = model.module
 
   start_epoch = 0
   global epoch
@@ -607,35 +497,13 @@ def main():
   if args.resume:
     if os.path.isfile(args.resume):
       checkpoint = torch.load(args.resume)
-      # start_epoch = checkpoint['epoch'] + 1
-      # best_acc = checkpoint['best_acc']
+
       net.load_state_dict(checkpoint['state_dict'])
       optimizer.load_state_dict(checkpoint['optimizer'])
-      # net.load_state_dict(checkpoint['model_state_dict'])
-      # optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
       logger.info('Model restored from {}'.format(args.resume))
 
-      # mce1, mce5 = test_c(net, test_data, base_c_path)
-      # writer.add_scalar('corruption/corruption_mean_acc1', mce1,0)
-      # writer.add_scalar('corruption/corruption_mean_acc5', mce5,0)
-      # logger.info('Corruption mean * Acc@1 {:.3f} Acc@5 {:.3f}'.format(mce1, mce5))
-
   if args.evaluate:
-    # Evaluate clean accuracy first because test_c mutates underlying data
-    # test_loss, test_acc = test(net, test_loader)
-    # print('Clean\n\tTest Loss {:.3f} | Test Error {:.2f}'.format(
-    #     test_loss, 100 - 100. * test_acc))
-
-    # test_c_acc = test_c(net, test_data, base_c_path)
-    # print('Mean Corruption Error: {:.3f}'.format(100 - 100. * test_c_acc))
-
-    # acc1, acc5 = test_my(net, test_loader)
-    # logger.info('Clean * Acc@1 {:.3f} Acc@5 {:.3f}'.format(acc1, acc5))
-
     mce1, mce5 = test_c(net, test_data, base_c_path)
-    # writer.add_scalar('corruption/corruption_mean_acc1', acc1)
-    # writer.add_scalar('corruption/corruption_mean_acc5', mce5)
-
     logger.info('Corruption mean * Acc@1 {:.3f} Acc@5 {:.3f}'.format(mce1, mce5))
     return
 
@@ -646,12 +514,6 @@ def main():
           args.epochs * len(train_loader),
           1,  # lr_lambda computes multiplicative factor
           1e-6 / args.learning_rate))
-  # scheduler=torch.optim.lr_scheduler.CosineAnnealingLR(optimizer,args.epochs*len(train_loader))
-  # scheduler=torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min')
-  # scheduler=torch.optim.lr_scheduler.OneCycleLR(optimizer,args.learning_rate,steps_per_epoch=len(train_loader), epochs=args.epochs)
-  # scheduler=torch.optim.lr_scheduler.CyclicLR(optimizer,1e-6 / args.learning_rate,args.learning_rate)
-
-
 
   if not os.path.exists(args.save):
     os.makedirs(args.save)
@@ -667,8 +529,6 @@ def main():
   logger.info('Beginning training from epoch:{}'.format(start_epoch + 1))
   for epoch in range(start_epoch, args.epochs):
     begin_time = time.time()
-    # train_loader.sampler.set_epoch(epoch)
-    # test_loader.sampler.set_epoch(epoch)
 
     train_loss_ema = train(net, train_loader, optimizer, scheduler)
     test_loss, test_acc = test(net, test_loader)
@@ -707,11 +567,6 @@ def main():
         ' Test Error {4:.2f}'
         .format((epoch + 1), int(time.time() - begin_time), train_loss_ema,
                 test_loss, 100 - 100. * test_acc))
-    # 此处有bug，不能打开
-    # if epoch%args.eval_crpt==0:
-    #   mce1, mce5 = test_c(net, test_data, base_c_path)
-    #   writer.add_scalar('Total/Test_C Acc', mce1,epoch)
-    #   logger.info('C_Acc1: {:.3f}, C_Acc5: {:.3f}'.format(mce1, mce5))
 
   mce1, mce5 = test_c(net, test_data, base_c_path)
   logger.info('C_Acc1: {:.3f}, C_Acc5: {:.3f}'.format(mce1, mce5))
@@ -719,14 +574,6 @@ def main():
   with open(log_path, 'a') as f:
     f.write('%03d,%05d,%0.6f,%0.5f,%0.2f\n' %
             (args.epochs + 1, 0, 0, 0, 100 - mce1))
-
-  # test_c_acc = test_c(net, test_data, base_c_path)
-  # print('Mean Corruption Error: {:.3f}'.format(100 - 100. * test_c_acc))
-
-  # with open(log_path, 'a') as f:
-  #     f.write('%03d,%05d,%0.6f,%0.5f,%0.2f\n' %
-  #             (args.epochs + 1, 0, 0, 0, 100 - 100 * test_c_acc))
-
 
 
 def get_preds_and_features(model,images):
@@ -737,207 +584,25 @@ def get_preds_and_features(model,images):
       features_tmp[output.device].append(output)
 
     handles=[]
-    # for module in model.module.features:
-    #   if 'Conv2d' in module._get_name():
-    #       handles.append(module.register_forward_hook(hook))
-    #       break
     handles.append(model.module.features.register_forward_hook(hook))
 
 
     preds = model(images)
     for handle in handles:
-      handle.remove() ## hook删除 
+      handle.remove()
 
-    # 
+    # gather feature to the same device
     features=[]
     device_keys=list(features_tmp.keys())
-    feature_num=len(features_tmp[device_keys[0]])
-    samples_num=features_tmp[device_keys[0]][0].shape[0]
-    for i in range(feature_num):
-      feature_i=[]
-      for key in device_keys:
-          feature_i.append(features_tmp[key][i].cuda(0))
-      feature_i=torch.cat(feature_i,dim=0)
-      features.append(feature_i)
-    # del features_tmp
-    # torch.cuda.empty_cache()
+    for key in device_keys:
+        features.append(features_tmp[key][0].cuda(0))
+    features=torch.cat(features,dim=0)
     return preds,features
-
-def get_corr(fake_Y, Y):#计算两个向量person相关系数
-    fake_Y, Y = fake_Y.reshape(-1), Y.reshape(-1)
-    fake_Y_mean, Y_mean = torch.mean(fake_Y), torch.mean(Y)
-    corr = (torch.sum((fake_Y - fake_Y_mean) * (Y - Y_mean))) / (
-                torch.sqrt(torch.sum((fake_Y - fake_Y_mean) ** 2)) * torch.sqrt(torch.sum((Y - Y_mean) ** 2)))
-    return corr
-
-def my_loss(logits_all,features_all,targets):
-    marg=0.1
-    logits_clean=logits_all[0]
-    logits_aug1=logits_all[1]
-    logits_aug2=logits_all[2]
-    
-    # loss for pred
-    loss_pred = F.cross_entropy(logits_clean, targets.cuda())
-    # loss_pred += F.cross_entropy(logits_aug1, targets)
-    # loss_pred += F.cross_entropy(logits_aug2, targets)
-    # loss_pred = loss_pred/3.
-
-    loss_feature=0.
-    features_clean=features_all[0][0].reshape(len(targets),-1)
-    features_aug1=features_all[1][0].reshape(len(targets),-1)
-    features_aug2=features_all[2][0].reshape(len(targets),-1)
-    # features_clean=features_all[0][1].reshape(len(targets),-1)
-    # features_aug1=features_all[1][1].reshape(len(targets),-1)
-    # features_aug2=features_all[2][1].reshape(len(targets),-1)
-    logger.debug('features_clean: {} {} {} features_aug1: {} {} {} features_aug2: {} {} {}'.format(features_clean.min(),features_clean.max(),features_clean.mean(),
-                                                                                                 features_aug1.min(),features_aug1.max(),features_aug1.mean(),
-                                                                                                 features_aug2.min(),features_aug2.max(),features_aug2.mean()))
-
-    # features_clean_mean=features_clean
-    features_clean_mean=torch.mean(features_clean,dim=0).reshape(1,-1)
-    features_clean_mean=features_clean_mean.repeat_interleave(len(targets),dim=0)
-    logger.debug('features_clean_mean: {} {} {}'.format(features_clean_mean.min(),features_clean_mean.max(),features_clean_mean.mean()))
-
-    sim_aug1=F.cosine_similarity(features_clean_mean,features_aug1,axis=-1).cuda()
-    logger.debug('sim_aug1: {} {} {}'.format(sim_aug1.min(),sim_aug1.max(),sim_aug1.mean()))
-    sim_aug2=F.cosine_similarity(features_clean_mean,features_aug2,axis=-1).cuda()
-    logger.debug('sim_aug2: {} {} {}'.format(sim_aug2.min(),sim_aug2.max(),sim_aug2.mean()))
-    # sim_aug1=torch.ones(len(targets))
-    # for i in range(len(sim_aug1)):
-    #   sim_aug1[i]=F.cosine_similarity(features_clean_mean,features_aug1[i,...].reshape(1,-1))
-    # sim_aug2=torch.ones(len(targets))
-    # for i in range(len(sim_aug2)):
-    #   sim_aug2[i]=F.cosine_similarity(features_clean_mean,features_aug2[i,...].reshape(1,-1))
-    scale_aug1=torch.exp((sim_aug1-1)*(sim_aug1-1))#.cuda().requires_grad_(False)
-    logger.debug('scale_aug1: {} {} {}'.format(scale_aug1.min(),scale_aug1.max(),scale_aug1.mean()))
-
-    scale_aug2=torch.exp((sim_aug2-1)*(sim_aug2-1))#.cuda().requires_grad_(False)
-    logger.debug('scale_aug2: {} {} {}'.format(scale_aug2.min(),scale_aug2.max(),scale_aug2.mean()))
-
-    # scale_aug1=scale_aug1*(torch.exp(epoch-100))
-    # scale_aug2=scale_aug2*(torch.exp(epoch-100))
-    # loss_feature=torch.mean(torch.stack(loss_feature))
-
-    # loss for jsd
-    loss_jsd=0.
-    p_clean, p_aug1, p_aug2 = F.softmax(
-        logits_clean, dim=1), F.softmax(
-            logits_aug1, dim=1), F.softmax(
-                logits_aug2, dim=1)
-    p_mixture = torch.clamp((p_clean + p_aug1 + p_aug2) / 3., 1e-7, 1).log()
-
-    # _, pred_aug1 = torch.max(p_aug1, 1)
-    # _, pred_aug2 = torch.max(p_aug2, 1)
-    # correct_aug1 = (pred_aug1 == targets)
-    # correct_aug2 = (pred_aug2 == targets)
-    n_img=p_aug1.shape[0]
-    target_onehot=torch.zeros_like(p_aug1).scatter_(1, targets.reshape(-1,1), 1)
-    target_logits1=p_aug1*target_onehot
-    target_logits1=target_logits1.sum(axis=1)
-    n_correct_aug1=torch.sum((target_logits1>0.5))
-    topk_aug1=target_logits1.topk(int(TOPK*(n_img-n_correct_aug1)+n_correct_aug1),dim=0)[0][-1]
-    correct_aug1=target_logits1>topk_aug1
-    target_logits2=p_aug2*target_onehot
-    target_logits2=target_logits2.sum(axis=1)
-    n_correct_aug2=torch.sum((target_logits2>0.5))
-    topk_aug2=target_logits2.topk(int(TOPK*(n_img-n_correct_aug2)+n_correct_aug2),dim=0)[0][-1]
-    correct_aug2=target_logits2>topk_aug2
-    # print(TOPK)
-    
-    scale_epoch=np.exp(min(0,TOPk_EPOCH-epoch))
-    scale_aug1=scale_aug1*((~correct_aug1)*scale_epoch+correct_aug1)
-    scale_aug2=scale_aug2*((~correct_aug2)*scale_epoch+correct_aug2)
-
-    kl_div_aug1=F.kl_div(p_mixture, p_aug1, reduction='none').mean(axis=-1)
-    kl_div_aug2=F.kl_div(p_mixture, p_aug2, reduction='none').mean(axis=-1)
-    # for i in range(len(kl_div_aug1)):
-    kl_div_aug1=kl_div_aug1*scale_aug1
-    logger.debug('kl_div_aug1: {} {} {}'.format(kl_div_aug1.min(),kl_div_aug1.max(),kl_div_aug1.mean()))
-
-    kl_div_aug2=kl_div_aug2*scale_aug2
-    logger.debug('kl_div_aug2: {} {} {}'.format(kl_div_aug2.min(),kl_div_aug2.max(),kl_div_aug2.mean()))
-
-
-    loss_jsd = 12 * (F.kl_div(p_mixture, p_clean, reduction='batchmean') +
-                  torch.mean(kl_div_aug1) +
-                  torch.mean(kl_div_aug2)) / 3.
-    # loss_jsd=0.
-    # lables=torch.hstack(targets)
-    # p_clean, p_aug1, p_aug2 = F.softmax(
-    #     logits_clean, dim=1), F.softmax(
-    #         logits_aug1, dim=1), F.softmax(
-    #             logits_aug2, dim=1)
-    # p_mixture = torch.clamp((p_clean + p_aug1 + p_aug2) / 3., 1e-7, 1).log()
-    # loss_jsd = 12 * (F.kl_div(p_mixture, p_clean, reduction='batchmean') +
-    #               F.kl_div(p_mixture, p_aug1, reduction='batchmean') +
-    #               F.kl_div(p_mixture, p_aug2, reduction='batchmean')) / 3.
-    # p_clean, p_aug1, p_aug2 = F.softmax(
-    #     logits_clean, dim=1), F.softmax(
-    #         logits_aug1, dim=1), F.softmax(
-    #             logits_aug2, dim=1)
-    # p_mixture = torch.clamp((p_clean + p_aug1) / 2., 1e-7, 1).log()
-    # loss_jsd = 8 * (F.kl_div(p_mixture, p_clean, reduction='batchmean') +
-    #               F.kl_div(p_mixture, p_aug1, reduction='batchmean')) / 2.
-
-    # loss for features
-    loss_feature=0.
-    # loss_tv=TVLoss()
-    # features_clean_conv=features_all[0][0]
-    # features_aug1_conv=features_all[1][0]
-    # features_aug2_conv=features_all[2][0]
-    # loss_feature=loss_tv(features_clean_conv)+loss_tv(features_aug1_conv)+loss_tv(features_aug2_conv)
-
-
-    # loss_nxt = NTXentLoss()
-    # # loss_nxt = pml_dist.DistributedLossWrapper(loss_nxt)
-    # loss_jsd=loss_nxt(torch.vstack(logits_all), lables)
-
-
-
-    # loss_feature=[]
-    
-    # features_clean=features_all[0]
-    # features_aug1=features_all[1]
-    # features_aug2=features_all[2]
-    # for i in range(len(features_clean)):
-    #   features_tmp=torch.vstack([features_clean[i].reshape(len(logits_clean),-1),
-    #                              features_aug1[i].reshape(len(logits_aug1),-1),
-    #                              features_aug2[i].reshape(len(logits_aug2),-1)])
-    #   loss_feature.append(loss_nxt(features_tmp, lables))
-    # loss_feature=torch.mean(torch.stack(loss_feature))
-    
-    # loss_feature=0.
-    # features_clean=features_all[0]
-    # features_aug1=features_all[1]
-    # features_aug2=features_all[2]
-    # device_keys=list(features_clean.keys())
-    # feature_num=len(features_clean[device_keys[0]])
-    # samples_num=features_clean[device_keys[0]][0].shape[0]
-    # for i in range(feature_num):
-    #   for key in device_keys:
-    #     for j in range(samples_num):
-    #       loss_tmp=0.
-    #       # loss_tmp+=get_corr(features_clean[key][i][j,...].flatten(),features_aug1[key][i][j,...].flatten())
-    #       # loss_tmp+=get_corr(features_clean[key][i][j,...].flatten(),features_aug2[key][i][j,...].flatten())
-    #       loss_tmp+=F.cosine_similarity(features_clean[key][i][j,...].flatten(),features_aug1[key][i][j,...].flatten(),axis=0)
-    #       loss_tmp-=F.cosine_similarity(features_clean[key][i][j,...].flatten(),features_aug2[key][i][j,...].flatten(),axis=0)
-    #       loss_tmp=loss_tmp.cpu()+1#max(loss_tmp.cpu()+1,0.)
-    #       loss_feature+=loss_tmp
-    #     # loss_feature+=loss_tmp.cpu()+marg
-    #       # loss_tmp+=torch.norm(features_clean[key][i][j,...]-features_aug1[key][i][j,...])
-    #       # loss_tmp-=torch.norm(features_clean[key][i][j,...]-features_aug2[key][i][j,...])
-    #     # loss_feature+=loss_tmp.cpu()
-    # loss_feature=loss_feature/feature_num/samples_num/len(device_keys)/2.
-
-    # loss_feature=loss_feature.cuda()
-
-    return loss_pred,loss_jsd,loss_feature
 
 
 
 if __name__ == '__main__':
 
-  # os.environ['CUDA_VISIBLE_DEVICES']='0'
   '''
   初始化日志系统
   '''
