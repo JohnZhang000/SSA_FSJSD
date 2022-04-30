@@ -625,8 +625,8 @@ def get_preds_and_features(model,images,model_name):
       features_tmp[output.device].append(output)
 
     handles=[]
-    if 'resnet'== model_name: handles.append(model.module.layer4.register_forward_hook(hook))
-    else: raise Exception('model not supported')
+    if 'resnet50'== model_name: handles.append(model.module.layer4.register_forward_hook(hook))
+    else: raise Exception('{} not supported'.format(model_name))
 
 
     preds = model(images)

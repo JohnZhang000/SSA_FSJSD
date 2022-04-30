@@ -129,7 +129,7 @@ parser.add_argument('--evaluate', action='store_true', help='Eval only.')
 parser.add_argument(
     '--print-freq',
     type=int,
-    default=10,
+    default=50,
     help='Training loss print frequency (batches).')
 parser.add_argument(
     '--pretrained',

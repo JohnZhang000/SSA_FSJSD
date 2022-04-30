@@ -447,10 +447,10 @@ def main():
     num_classes = 10
   else:
     train_data = datasets.CIFAR100(
-        './data/cifar', train=True, transform=train_transform, download=True)
+       root_dataset_dir+'/cifar-100', train=True, transform=train_transform, download=True)
     test_data = datasets.CIFAR100(
-        './data/cifar', train=False, transform=test_transform, download=True)
-    base_c_path = './data/cifar/CIFAR-100-C/'
+       root_dataset_dir+'/cifar-100', train=False, transform=test_transform, download=True)
+    base_c_path = root_dataset_dir+'/cifar-100-c/'
     num_classes = 100
 
   train_data = AugMixDataset(train_data, preprocess, args.no_jsd)
