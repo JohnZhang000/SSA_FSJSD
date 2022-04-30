@@ -308,7 +308,7 @@ for channel in range(3):
 
 def my_spectrum_noiser(pil_img, level):
     dct,sign=img2dct(pil_img)
-    _,H,W=dct.shape
+    C,H,W=dct.shape
 
     # add contrast
     dct0=dct[:,0,0]
@@ -323,9 +323,10 @@ def my_spectrum_noiser(pil_img, level):
     circmask = r2 <= r_thresh*H*r_thresh*W
     mask[circmask] = 0
 
-    dct[0,...]=dct[0,...]*(1+mask*np.random.randn(H,W)*np.random.random()*level/2)
-    dct[1,...]=dct[1,...]*(1+mask*np.random.randn(H,W)*np.random.random()*level/2)
-    dct[2,...]=dct[2,...]*(1+mask*np.random.randn(H,W)*np.random.random()*level/2)
+    dct=dct*(1+mask*np.random.randn(C,H,W)*np.random.random()*level/2)
+    # dct[0,...]=dct[0,...]*(1+mask*np.random.randn(H,W)*np.random.random()*level/2)
+    # dct[1,...]=dct[1,...]*(1+mask*np.random.randn(H,W)*np.random.random()*level/2)
+    # dct[2,...]=dct[2,...]*(1+mask*np.random.randn(H,W)*np.random.random()*level/2)
 
     img_out=dct2img(dct,sign)
     return img_out

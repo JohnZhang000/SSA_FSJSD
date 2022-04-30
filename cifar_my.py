@@ -163,7 +163,17 @@ parser.add_argument(
 parser.add_argument(
     '--contrast_scale',
     type=float,
-    default=1.5,
+    default=1.0,
+    help='r thresh for impulse noise')
+parser.add_argument(
+    '--topk',
+    type=float,
+    default=0.5,
+    help='r thresh for impulse noise')
+parser.add_argument(
+    '--topk_epoch',
+    type=int,
+    default=60,
     help='r thresh for impulse noise')
 
 # distributed training parameters
@@ -178,6 +188,8 @@ parser.add_argument(
 args = parser.parse_args()
 augmentations.IMPULSE_THRESH = args.imp_thresh
 augmentations.CONTRAST_SCALE = args.contrast_scale
+TOPK=args.topk
+TOPk_EPOCH=args.topk_epoch
 
 CORRUPTIONS = [
     'defocus_blur', 'glass_blur', 'motion_blur', 'zoom_blur',
@@ -818,17 +830,21 @@ def my_loss(logits_all,features_all,targets):
     # _, pred_aug2 = torch.max(p_aug2, 1)
     # correct_aug1 = (pred_aug1 == targets)
     # correct_aug2 = (pred_aug2 == targets)
+    n_img=p_aug1.shape[0]
     target_onehot=torch.zeros_like(p_aug1).scatter_(1, targets.reshape(-1,1), 1)
     target_logits1=p_aug1*target_onehot
     target_logits1=target_logits1.sum(axis=1)
-    topk_aug1=target_logits1.topk(int(0.75*p_aug1.shape[0]),dim=0)[0][-1]
+    n_correct_aug1=torch.sum((target_logits1>0.5))
+    topk_aug1=target_logits1.topk(int(TOPK*(n_img-n_correct_aug1)+n_correct_aug1),dim=0)[0][-1]
     correct_aug1=target_logits1>topk_aug1
     target_logits2=p_aug2*target_onehot
     target_logits2=target_logits2.sum(axis=1)
-    topk_aug2=target_logits2.topk(int(0.75*p_aug2.shape[0]),dim=0)[0][-1]
+    n_correct_aug2=torch.sum((target_logits2>0.5))
+    topk_aug2=target_logits2.topk(int(TOPK*(n_img-n_correct_aug2)+n_correct_aug2),dim=0)[0][-1]
     correct_aug2=target_logits2>topk_aug2
+    # print(TOPK)
     
-    scale_epoch=np.exp(min(0,60-epoch))
+    scale_epoch=np.exp(min(0,TOPk_EPOCH-epoch))
     scale_aug1=scale_aug1*((~correct_aug1)*scale_epoch+correct_aug1)
     scale_aug2=scale_aug2*((~correct_aug2)*scale_epoch+correct_aug2)
 
