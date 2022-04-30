@@ -324,9 +324,6 @@ def my_spectrum_noiser(pil_img, level):
     mask[circmask] = 0
 
     dct=dct*(1+mask*np.random.randn(C,H,W)*np.random.random()*level/2)
-    # dct[0,...]=dct[0,...]*(1+mask*np.random.randn(H,W)*np.random.random()*level/2)
-    # dct[1,...]=dct[1,...]*(1+mask*np.random.randn(H,W)*np.random.random()*level/2)
-    # dct[2,...]=dct[2,...]*(1+mask*np.random.randn(H,W)*np.random.random()*level/2)
 
     img_out=dct2img(dct,sign)
     return img_out
