@@ -266,9 +266,9 @@ def train(net, train_loader, optimizer, scheduler):
   for i, (images, targets) in enumerate(train_loader):
     optimizer.zero_grad()
 
-    logits_clean,features_clean=get_preds_and_features(net,images[0].cuda())
-    logits_aug1,features_aug1=get_preds_and_features(net,images[1].cuda())
-    logits_aug2,features_aug2=get_preds_and_features(net,images[2].cuda())
+    logits_clean,features_clean=get_preds_and_features(net,images[0].cuda(),args.model)
+    logits_aug1,features_aug1=get_preds_and_features(net,images[1].cuda(),args.model)
+    logits_aug2,features_aug2=get_preds_and_features(net,images[2].cuda(),args.model)
     
     targets=targets.cuda()
     # loss for pred
@@ -576,7 +576,7 @@ def main():
             (args.epochs + 1, 0, 0, 0, 100 - mce1))
 
 
-def get_preds_and_features(model,images):
+def get_preds_and_features(model,images,model_name):
     features_tmp = {}
     def hook(module, input, output): 
       if output.device not in features_tmp.keys():
@@ -584,7 +584,11 @@ def get_preds_and_features(model,images):
       features_tmp[output.device].append(output)
 
     handles=[]
-    handles.append(model.module.features.register_forward_hook(hook))
+    if 'allconv'==model_name: handles.append(model.module.features.register_forward_hook(hook))
+    elif 'wrn'==model_name: handles.append(model.module.bn1.register_forward_hook(hook))
+    elif 'resnext'==model_name: handles.append(model.module.avgpool.register_forward_hook(hook))
+    elif 'densenet'==model_name: handles.append(model.module.bn1.register_forward_hook(hook))
+    else: raise Exception('model_name not supported')
 
 
     preds = model(images)
