@@ -201,6 +201,9 @@ def setup_seed(seed):
     np.random.seed(seed)
     random.seed(seed)
     torch.backends.cudnn.deterministic = True
+    torch.cuda.manual_seed(seed) # GPU
+    os.environ['PYTHONHASHSEED'] = str(seed) # 禁止hash随机化
+    torch.backends.cudnn.benchmark = False # True的话会自动寻找最适合当前配置的高效算法，来达到优化运行效率的问题。False保证实验结果可复现
     
 def select_model(model_type,dir_model):
     # dataset     ='cifar-10'

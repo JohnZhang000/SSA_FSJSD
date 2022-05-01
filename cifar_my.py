@@ -145,12 +145,12 @@ parser.add_argument(
 parser.add_argument(
     '--imp_thresh',
     type=float,
-    default=0.5,
+    default=0.25,
     help='r thresh for impulse noise')
 parser.add_argument(
     '--contrast_scale',
     type=float,
-    default=1.0,
+    default=1.5,
     help='r thresh for impulse noise')
 parser.add_argument(
     '--topk',
@@ -284,34 +284,35 @@ def train(net, train_loader, optimizer, scheduler):
     p_mixture = torch.clamp((p_clean + p_aug1 + p_aug2) / 3., 1e-7, 1).log()
 
     # with feature similarity
-    if not args.no_fsim:
-      features_clean=features_clean.reshape(n_img,-1)
-      features_aug1=features_aug1.reshape(n_img,-1)
-      features_aug2=features_aug2.reshape(n_img,-1)
+    # if not args.no_fsim:
+    features_clean=features_clean.reshape(n_img,-1)
+    features_aug1=features_aug1.reshape(n_img,-1)
+    features_aug2=features_aug2.reshape(n_img,-1)
 
-      features_clean_mean=torch.mean(features_clean,dim=0).reshape(1,-1).repeat_interleave(n_img,dim=0)
-      sim_aug1=F.cosine_similarity(features_clean_mean,features_aug1,axis=-1).cuda()
-      sim_aug2=F.cosine_similarity(features_clean_mean,features_aug2,axis=-1).cuda()
-      scale_aug1=torch.exp((sim_aug1-1)*(sim_aug1-1))
-      scale_aug2=torch.exp((sim_aug2-1)*(sim_aug2-1))
+    features_clean_mean=features_clean#torch.mean(features_clean,dim=0).reshape(1,-1).repeat_interleave(n_img,dim=0)
+    sim_aug1=F.cosine_similarity(features_clean_mean,features_aug1,axis=-1).cuda()
+    sim_aug2=F.cosine_similarity(features_clean_mean,features_aug2,axis=-1).cuda()
+    scale_aug1=torch.exp(2*(1-sim_aug1))
+    scale_aug2=torch.exp(2*(1-sim_aug2))
 
-      if not args.no_topk:
+      # if not args.no_topk:
         # with topk
-        topk_aug1=select_topk(p_aug1,targets)
-        topk_aug2=select_topk(p_aug2,targets)
-        if not args.no_timei:
-          # with time invariant
-          scale_epoch=np.exp(min(0,TOPk_EPOCH-epoch))
-        else:
-          scale_epoch=1
-        scale_aug1=scale_aug1*((~topk_aug1)*scale_epoch+topk_aug1)
-        scale_aug2=scale_aug2*((~topk_aug2)*scale_epoch+topk_aug2)
+    # topk_aug1=select_topk(p_aug1,targets)
+    # topk_aug2=select_topk(p_aug2,targets)
+    #     # if not args.no_timei:
+    #       # with time invariant
+    # scale_epoch=np.exp(min(0,TOPk_EPOCH-epoch))
+    #     # else:
+    #     #   scale_epoch=1
+    # scale_aug1=scale_aug1*((~topk_aug1)*scale_epoch+topk_aug1)
+    # scale_aug2=scale_aug2*((~topk_aug2)*scale_epoch+topk_aug2)
 
-      kl_div_aug1=scale_aug1*F.kl_div(p_mixture, p_aug1, reduction='none').mean(axis=-1)
-      kl_div_aug2=scale_aug2*F.kl_div(p_mixture, p_aug2, reduction='none').mean(axis=-1)
-    else:
-      kl_div_aug1=F.kl_div(p_mixture, p_aug1, reduction='none').mean(axis=-1)
-      kl_div_aug2=F.kl_div(p_mixture, p_aug2, reduction='none').mean(axis=-1)
+    kl_div_aug1=scale_aug1*F.kl_div(p_mixture, p_aug1, reduction='none').mean(axis=-1)
+    kl_div_aug2=scale_aug2*F.kl_div(p_mixture, p_aug2, reduction='none').mean(axis=-1)
+    # else:
+    #   # print('No scale')
+    kl_div_aug1=F.kl_div(p_mixture, p_aug1, reduction='none').mean(axis=-1)
+    kl_div_aug2=F.kl_div(p_mixture, p_aug2, reduction='none').mean(axis=-1)
 
     loss_jsd = 12 * (F.kl_div(p_mixture, p_clean, reduction='batchmean') +
                   torch.mean(kl_div_aug1) +
@@ -330,6 +331,10 @@ def train(net, train_loader, optimizer, scheduler):
       writer.add_scalar('Loss/Loss_sum',loss,epoch*len(train_loader)+i)
       writer.add_scalar('Loss/Loss_pred',loss_pred,epoch*len(train_loader)+i)
       writer.add_scalar('Loss/Loss_jsd',loss_jsd,epoch*len(train_loader)+i)
+      writer.add_scalar('Scale/aug1_mean',scale_aug1.mean().detach().cpu().numpy(),epoch*len(train_loader)+i)
+      writer.add_scalar('Scale/aug1_std',scale_aug1.std().detach().cpu().numpy(),epoch*len(train_loader)+i)
+      writer.add_scalar('Scale/aug2_mean',scale_aug2.mean().detach().cpu().numpy(),epoch*len(train_loader)+i)
+      writer.add_scalar('Scale/aug2_std',scale_aug2.std().detach().cpu().numpy(),epoch*len(train_loader)+i)
 
       # for tag, value in net.named_parameters():
       #   tag = tag.replace('.', '/')
@@ -419,8 +424,8 @@ def test_c(net, test_data, base_path):
 
 
 def main():
-  torch.manual_seed(1)
-  np.random.seed(1)
+  # torch.manual_seed(1)
+  # np.random.seed(1)
 
   # Load datasets
   train_transform = transforms.Compose(
@@ -458,6 +463,7 @@ def main():
       train_data,
       batch_size=args.batch_size,
       shuffle=True,
+      drop_last=False,
       num_workers=args.num_workers,
       pin_memory=False)
 
@@ -465,6 +471,7 @@ def main():
       test_data,
       batch_size=args.eval_batch_size,
       shuffle=False,
+      drop_last=False,
       num_workers=args.num_workers,
       pin_memory=False)
 
@@ -607,6 +614,7 @@ def get_preds_and_features(model,images,model_name):
 
 if __name__ == '__main__':
 
+  g.setup_seed(1)
   '''
   初始化日志系统
   '''
