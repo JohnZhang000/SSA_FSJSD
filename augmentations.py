@@ -203,6 +203,11 @@ augmentations = [
     translate_x, translate_y, my_spectrum_noiser
 ]
 
+augmentations_std = [
+    autocontrast, equalize, posterize, rotate, solarize, shear_x, shear_y,
+    translate_x, translate_y
+]
+
 augmentations_all = [
     autocontrast, equalize, posterize, rotate, solarize, shear_x, shear_y,
     translate_x, translate_y, color, contrast, brightness, sharpness

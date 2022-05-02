@@ -140,7 +140,7 @@ parser.add_argument(
 parser.add_argument(
     '--num-workers',
     type=int,
-    default=4,
+    default=16,
     help='Number of pre-fetching threads.')
 
 args = parser.parse_args()
@@ -219,7 +219,7 @@ def aug(image, preprocess):
   Returns:
     mixed: Augmented and mixed image.
   """
-  aug_list = augmentations.augmentations
+  aug_list = augmentations.augmentations_std
   if args.all_ops:
     aug_list = augmentations.augmentations_all
 
@@ -415,10 +415,10 @@ def main():
   ])
 
   device=socket.gethostname()
-  if 'estar-403'==device: root_dataset_dir='/home/estar/Datasets/ILSVRC2012-10'
-  elif 'Jet'==device: root_dataset_dir='/mnt/sdb/zhangzhuang/Datasets/ILSVRC2012-10'
-  elif '1080x4-1'==device: root_dataset_dir='/home/zhangzhuang/Datasets/ILSVRC2012-10'
-  elif 'ubuntu204'==device: root_dataset_dir='/media/ubuntu204/F/DatasetILSVRC2012-10'
+  if 'estar-403'==device: root_dataset_dir='/home/estar/Datasets/ILSVRC2012-100'
+  elif 'Jet'==device: root_dataset_dir='/mnt/sdb/zhangzhuang/Datasets/ILSVRC2012-100'
+  elif '1080x4-1'==device: root_dataset_dir='/home/zhangzhuang/Datasets/ILSVRC2012-100'
+  elif 'ubuntu204'==device: root_dataset_dir='/media/ubuntu204/F/DatasetILSVRC2012-100'
   else: raise Exception('Wrong device')
   args.clean_data=root_dataset_dir
   args.corrupted_data=root_dataset_dir+'-C'

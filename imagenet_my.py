@@ -176,6 +176,11 @@ parser.add_argument(
     '-nti',
     action='store_true',
     help='Turn off time invariant loss.')
+parser.add_argument(
+    '--alpha',
+    type=float,
+    default=5.0,
+    help='r thresh for impulse noise')
 
 args = parser.parse_args()
 augmentations.IMPULSE_THRESH = args.imp_thresh
@@ -301,7 +306,7 @@ def select_topk(p_y,y):
     topk=target_logits>topk_aug1
     return topk
 
-def train(net, train_loader, optimizer):
+def train(net, train_loader, optimizer,scheduler):
   """Train for one epoch."""
   net.train()
   data_ema = 0.
@@ -339,23 +344,23 @@ def train(net, train_loader, optimizer):
       features_aug1=features_aug1.reshape(n_img,-1)
       features_aug2=features_aug2.reshape(n_img,-1)
 
-      features_clean_mean=torch.mean(features_clean,dim=0).reshape(1,-1).repeat_interleave(n_img,dim=0)
+      features_clean_mean=features_clean#torch.mean(features_clean,dim=0).reshape(1,-1).repeat_interleave(n_img,dim=0)
       sim_aug1=F.cosine_similarity(features_clean_mean,features_aug1,axis=-1).cuda()
       sim_aug2=F.cosine_similarity(features_clean_mean,features_aug2,axis=-1).cuda()
-      scale_aug1=torch.exp((sim_aug1-1)*(sim_aug1-1))
-      scale_aug2=torch.exp((sim_aug2-1)*(sim_aug2-1))
+      scale_aug1=torch.exp(args.alpha*(1-sim_aug1))
+      scale_aug2=torch.exp(args.alpha*(1-sim_aug2))
 
-      if not args.no_topk:
-        # with topk
-        topk_aug1=select_topk(p_aug1,targets)
-        topk_aug2=select_topk(p_aug2,targets)
-        if not args.no_timei:
-          # with time invariant
-          scale_epoch=np.exp(min(0,TOPk_EPOCH-epoch))
-        else:
-          scale_epoch=1
-        scale_aug1=scale_aug1*((~topk_aug1)*scale_epoch+topk_aug1)
-        scale_aug2=scale_aug2*((~topk_aug2)*scale_epoch+topk_aug2)
+      # if not args.no_topk:
+      #   # with topk
+      #   topk_aug1=select_topk(p_aug1,targets)
+      #   topk_aug2=select_topk(p_aug2,targets)
+      #   if not args.no_timei:
+      #     # with time invariant
+      #     scale_epoch=np.exp(min(0,TOPk_EPOCH-epoch))
+      #   else:
+      #     scale_epoch=1
+      #   scale_aug1=scale_aug1*((~topk_aug1)*scale_epoch+topk_aug1)
+      #   scale_aug2=scale_aug2*((~topk_aug2)*scale_epoch+topk_aug2)
 
       kl_div_aug1=scale_aug1*F.kl_div(p_mixture, p_aug1, reduction='none').mean(axis=-1)
       kl_div_aug2=scale_aug2*F.kl_div(p_mixture, p_aug2, reduction='none').mean(axis=-1)
@@ -374,6 +379,7 @@ def train(net, train_loader, optimizer):
     loss.backward()
     lr=optimizer.param_groups[0]['lr']
     optimizer.step()
+    scheduler.step()
 
     # Compute batch computation time and update moving averages.
     batch_time = time.time() - end
@@ -528,6 +534,10 @@ def main():
       args.learning_rate,
       momentum=args.momentum,
       weight_decay=args.decay)
+  scheduler =torch.optim.lr_scheduler.OneCycleLR(optimizer,
+                                                 total_steps=args.epochs*len(train_loader),
+                                                 max_lr=args.learning_rate*args.batch_size / 256,
+                                                 three_phase=False)
 
   # Distribute model across all visible GPUs
   net = torch.nn.DataParallel(net).cuda()
@@ -571,10 +581,10 @@ def main():
   best_acc1 = 0
   logger.info('Beginning training from epoch:{}'.format(start_epoch + 1))
   for epoch in range(start_epoch, args.epochs):
-    adjust_learning_rate(optimizer, epoch)
+    # adjust_learning_rate(optimizer, epoch)
 
     train_loss_ema, train_acc1_ema, batch_ema = train(net, train_loader,
-                                                      optimizer)
+                                                      optimizer,scheduler)
     test_loss, test_acc1 = test(net, val_loader)
 
     is_best = test_acc1 > best_acc1
