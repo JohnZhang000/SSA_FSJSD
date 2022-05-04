@@ -22,6 +22,7 @@ from scipy.fftpack import dct,idct
 IMAGE_SIZE = 32
 IMPULSE_THRESH=1.0
 CONTRAST_SCALE=1.5
+NOISE_SCALE=0.5
 
 
 def int_parameter(level, maxval):
@@ -193,7 +194,7 @@ def my_spectrum_noiser(pil_img, level):
     circmask = r2 <= r_thresh*H*r_thresh*W
     mask[circmask] = 0
 
-    dct=dct*(1+mask*np.random.randn(C,H,W)*np.random.random()*level/2)
+    dct=dct*(1+mask*np.random.randn(C,H,W)*np.random.random()*level*NOISE_SCALE)
 
     img_out=dct2img(dct,sign)
     return img_out

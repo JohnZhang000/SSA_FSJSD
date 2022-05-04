@@ -153,6 +153,11 @@ parser.add_argument(
     default=1.0,
     help='r thresh for impulse noise')
 parser.add_argument(
+    '--noise_scale',
+    type=float,
+    default=0.5,
+    help='r thresh for impulse noise')
+parser.add_argument(
     '--topk',
     type=float,
     default=0.5,
@@ -180,12 +185,13 @@ parser.add_argument(
 parser.add_argument(
     '--alpha',
     type=float,
-    default=5.0,
+    default=3.0,
     help='r thresh for impulse noise')
 
 args = parser.parse_args()
 augmentations.IMPULSE_THRESH = args.imp_thresh
 augmentations.CONTRAST_SCALE = args.contrast_scale
+augmentations.NOISE_SCALE = args.noise_scale
 TOPK=args.topk
 TOPk_EPOCH=int(args.topk_epoch*args.epochs)
 
@@ -421,7 +427,7 @@ def test_c(net, test_data, base_path):
     writer.add_scalar('corruption/'+corruption+'_acc1', acc1,epoch)
     writer.add_scalar('corruption/'+corruption+'_acc5', acc5,epoch)
     logger.info('{} * Acc@1 {:.3f} Acc@5 {:.3f}'.format(corruption, acc1, acc5))
-  logger.info('Corruption 15* Acc@1 {:.3f} Acc@5 {:.3f}'.format(np.mean(corruption_acc1s[4:]), np.mean(corruption_acc5s[4:])))
+  logger.info('Corruption 15* Acc@1 {:.3f} Acc@5 {:.3f}'.format(np.mean(corruption_acc1s[0:15]), np.mean(corruption_acc5s[0:15])))
 
 
   return np.mean(corruption_acc1s),np.mean(corruption_acc5s)
