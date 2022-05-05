@@ -8,7 +8,7 @@ from PIL import Image
 import torch
 from torchvision import transforms
 from torchvision.datasets import CIFAR10, CIFAR100, ImageFolder
-from datasets.transforms import train_transforms, test_transforms
+from datasets.transforms import test_transforms_tiny_imagenet, train_transforms, test_transforms, train_transforms_tiny_imagenet,test_transforms_tiny_imagenet
 
 class CIFARC(CIFAR10):
     def __init__(
@@ -139,3 +139,51 @@ class CIFAR100D(object):
                 self.out_loaders[key] = out_loader
 
         self.num_classes = 100
+
+class TINY_IMAGENETD(object):
+    def __init__(self, dataroot='', use_gpu=True, num_workers=4, batch_size=128, _transforms='', _eval=False):
+
+        transforms_list = train_transforms_tiny_imagenet(_transforms)
+
+        train_transform = transforms.Compose(transforms_list)
+        test_transform = test_transforms_tiny_imagenet()
+        self.train_transform = train_transform
+
+        pin_memory = True if use_gpu else False
+
+        data_root = os.path.join(dataroot, 'tiny-imagenet')
+
+        # trainset = CIFAR100(root=data_root, train=True, download=True, transform=train_transform)
+        trainset = ImageFolder(data_root+'/train', train_transform)
+        
+        self.train_loader = torch.utils.data.DataLoader(
+            trainset, batch_size=batch_size, shuffle=True,
+            num_workers=num_workers, pin_memory=pin_memory,
+        )
+        
+        # testset = CIFAR100(root=data_root, train=False, download=True, transform=test_transform)
+        testset = ImageFolder(data_root+'/val', test_transform)
+        
+        self.test_loader = torch.utils.data.DataLoader(
+            testset, batch_size=batch_size, shuffle=False,
+            num_workers=num_workers, pin_memory=pin_memory,
+        )
+
+        if _eval:
+            self.out_loaders = dict()
+            self.out_keys = ['noise/gaussian_noise', 'noise/shot_noise', 'noise/impulse_noise', 
+                                'blur/defocus_blur', 'blur/glass_blur', 'blur/motion_blur', 'blur/zoom_blur', 
+                                'weather/snow', 'weather/frost', 'weather/fog', 'weather/brightness', 
+                                'digital/contrast', 'digital/elastic_transform', 'digital/pixelate', 'digital/jpeg_compression',]
+
+            data_root = os.path.join(dataroot, 'tiny-imagenet-c')
+            for key in self.out_keys:
+                for i in range(1,6):
+                    outset = ImageFolder(os.path.join(data_root,key,str(i)), test_transform)
+                    out_loader = torch.utils.data.DataLoader(
+                        outset, batch_size=batch_size, shuffle=False,
+                        num_workers=num_workers, pin_memory=pin_memory,
+                    )
+                    self.out_loaders[key+'_'+str(i)] = out_loader
+
+        self.num_classes = 1000
