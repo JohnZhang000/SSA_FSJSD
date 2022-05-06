@@ -9,6 +9,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from models.cifar10.resnet_DuBN import DualBatchNorm2d
+# from models.imagenet.resnet_DuBIN import Bottleneck_DuBIN
 
 class DuBIN(nn.Module):
     r"""Instance-Batch Normalization layer from
@@ -119,6 +120,8 @@ def ResNet34_DuBIN(num_classes=10, init_stride=1, ibn_cfg=('a', 'a', 'a', None))
 def ResNet34_DuBIN_b(num_classes=10, init_stride=1, ibn_cfg=('b', 'b', None, None)):
     return ResNet_DuBIN(BasicBlock_DuBIN, [3,4,6,3], ibn_cfg=ibn_cfg, num_classes=num_classes, init_stride=init_stride)
 
+# def ResNet50_DuBIN(num_classes=10, init_stride=1, ibn_cfg=('a', 'a', 'a', None)):
+#     return ResNet_DuBIN(Bottleneck_DuBIN, [3,4,6,3], ibn_cfg=ibn_cfg, num_classes=num_classes, init_stride=init_stride)
 
 
 if __name__ == '__main__':

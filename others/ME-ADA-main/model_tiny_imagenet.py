@@ -11,8 +11,10 @@ from models.allconv import AllConvNet
 from models.densenet import densenet
 from models.resnext import resnext29
 from models.wideresnet import WideResNet
-from torchvision import models
+from models.resnet import resnet50
 from common.utils import fix_all_seed, write_log, sgd, entropy_loss
+import socket
+import torch.nn as nn
 
 CORRUPTIONS = [
     'noise/gaussian_noise', 'noise/shot_noise', 'noise/impulse_noise', 
@@ -53,7 +55,7 @@ class ModelBaseline(object):
         # if flags.dataset == 'cifar10':
         #     num_classes = 10
         # else:
-        num_classes = 1000
+        num_classes = 200
 
         # if flags.model == 'densenet':
         #     self.network = densenet(num_classes=num_classes)
@@ -65,9 +67,10 @@ class ModelBaseline(object):
         #     self.network = resnext29(num_classes=num_classes)
         # else:
         #     raise Exception('Unknown model.')
-        print.info("=> creating model '{}'".format(flags.model))
-        net = models.__dict__[flags.model]()
-        self.network = self.network.cuda()
+        print("=> creating model '{}'".format(flags.model))
+        # net = models.__dict__[flags.model]()
+        net=resnet50(num_classes=num_classes)
+        self.network = torch.nn.DataParallel(net).cuda()#net.cuda()
 
         print(self.network)
         print('flags:', flags)
@@ -80,6 +83,12 @@ class ModelBaseline(object):
     def setup_path(self, flags):
 
         root_folder = 'data'
+        device=socket.gethostname()
+        if 'estar-403'==device: root_folder='/home/estar/Datasets/tiny-imagenet-200'
+        elif 'Jet'==device: root_folder='/mnt/sdb/zhangzhuang/Datasets/tiny-imagenet-200'
+        elif '1080x4-1'==device: root_folder='/home/zhangzhuang/Datasets/tiny-imagenet-200'
+        elif 'ubuntu204'==device: root_folder='/media/ubuntu204/F/Dataset/tiny-imagenet-200'
+        else: raise Exception('Wrong device')
         if not os.path.exists(flags.logs):
             os.makedirs(flags.logs)
 
@@ -104,7 +113,7 @@ class ModelBaseline(object):
             # self.base_c_path = os.path.join(root_folder, "CIFAR-100-C")
         self.train_data = datasets.ImageFolder(os.path.join(root_folder,'train'), self.train_transform)
         self.test_data = datasets.ImageFolder(os.path.join(root_folder,'val'), self.test_transform)
-        self.base_c_path = root_folder+'-c'
+        flags.base_c_path = root_folder+'-c'
 
         self.train_loader = torch.utils.data.DataLoader(
             self.train_data,
@@ -115,8 +124,8 @@ class ModelBaseline(object):
 
     def configure(self, flags):
 
-        for name, param in self.network.named_parameters():
-            print(name, param.size())
+        # for name, param in self.network.named_parameters():
+        #     print(name, param.size())
 
         self.optimizer = torch.optim.SGD(
             self.network.parameters(),
@@ -139,7 +148,7 @@ class ModelBaseline(object):
                 inputs, labels = images_train.cuda(), labels_train.cuda()
 
                 # forward with the adapted parameters
-                outputs, _ = self.network(x=inputs)
+                outputs,_ = self.network(x=inputs)
 
                 # loss
                 loss = self.loss_fn(outputs, labels)
@@ -154,7 +163,7 @@ class ModelBaseline(object):
                 self.optimizer.step()
                 self.scheduler.step()
 
-                if epoch < 5 or epoch % 5 == 0:
+                if i % 100 == 0:
                     print(
                         'epoch:', epoch, 'ite', i, 'total loss:', loss.cpu().item(), 'lr:',
                         self.scheduler.get_lr()[0])
@@ -162,19 +171,23 @@ class ModelBaseline(object):
                 flags_log = os.path.join(flags.logs, 'loss_log.txt')
                 write_log(str(loss.item()), flags_log)
 
-            self.test_workflow(epoch, flags)
+        self.test_workflow(epoch, flags)
 
     def test_workflow(self, epoch, flags):
 
         """Evaluate network on given corrupted dataset."""
         accuracies = []
+        flags_log = os.path.join(flags.logs, 'corruption.txt')
+        f = open(flags_log, mode='a')
+        f.close()
+        write_log('corruptions', flags_log)
         for count, corruption in enumerate(CORRUPTIONS):
             for level in range(1,6):
             # Reference to original data is mutated
-                valdir = os.path.join(flags.corrupted_data, corruption, str(level))
+                valdir = os.path.join(flags.base_c_path, corruption, str(level))
                 test_loader = torch.utils.data.DataLoader(
                     datasets.ImageFolder(valdir, self.test_transform),
-                    batch_size=flags.eval_batch_size,
+                    batch_size=flags.batch_size,
                     shuffle=False,
                     num_workers=flags.num_workers,
                     pin_memory=True)
@@ -188,10 +201,13 @@ class ModelBaseline(object):
                 #     num_workers=flags.num_workers,
                 #     pin_memory=True)
 
-                accuracy_test = self.test(test_loader, epoch, log_dir=flags.logs, log_prefix='test_index_{}_{}'.format(corruption,level))
+                accuracy_test = self.test(test_loader, epoch, log_dir=flags.logs, log_prefix='corruption_epoch')
                 accuracies.append(accuracy_test)
+                write_log('{}_{}:{}'.format(corruption,level,accuracy_test), flags_log)
 
         mean_acc = np.mean(accuracies)
+        write_log('mean:{}'.format(mean_acc), flags_log)
+
 
         if mean_acc > self.best_accuracy_test:
             self.best_accuracy_test = mean_acc
@@ -215,7 +231,7 @@ class ModelBaseline(object):
         with torch.no_grad():
             for images, targets in test_loader:
                 images, targets = images.cuda(), targets.cuda()
-                logits, _ = self.network(images)
+                logits,_ = self.network(images)
                 pred = logits.data.max(1)[1]
                 total_correct += pred.eq(targets.data).sum().item()
 
@@ -334,7 +350,7 @@ class ModelADA(ModelBaseline):
                 inputs, labels = images_train.cuda(), labels_train.cuda()
 
                 # forward with the adapted parameters
-                outputs, _ = self.network(x=inputs)
+                outputs,_ = self.network(x=inputs)
 
                 # loss
                 loss = self.loss_fn(outputs, labels)
@@ -349,7 +365,7 @@ class ModelADA(ModelBaseline):
                 self.optimizer.step()
                 self.scheduler.step()
 
-                if epoch < 5 or epoch % 5 == 0:
+                if i % 100 == 0:
                     print(
                         'epoch:', epoch, 'ite', i, 'total loss:', loss.cpu().item(), 'lr:',
                         self.scheduler.get_lr()[0])
@@ -357,7 +373,7 @@ class ModelADA(ModelBaseline):
                 flags_log = os.path.join(flags.logs, 'loss_log.txt')
                 write_log(str(loss.item()), flags_log)
 
-            self.test_workflow(epoch, flags)
+        self.test_workflow(epoch, flags)
 
 
 class ModelMEADA(ModelADA):

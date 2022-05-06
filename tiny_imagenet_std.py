@@ -415,10 +415,10 @@ def main():
   ])
 
   device=socket.gethostname()
-  if 'estar-403'==device: root_dataset_dir='/home/estar/Datasets/tiny-imagenet'
-  elif 'Jet'==device: root_dataset_dir='/mnt/sdb/zhangzhuang/Datasets/tiny-imagenet'
-  elif '1080x4-1'==device: root_dataset_dir='/home/zhangzhuang/Datasets/tiny-imagenet'
-  elif 'ubuntu204'==device: root_dataset_dir='/media/ubuntu204/F/Dataset/tiny-imagenet'
+  if 'estar-403'==device: root_dataset_dir='/home/estar/Datasets/tiny-imagenet-200'
+  elif 'Jet'==device: root_dataset_dir='/mnt/sdb/zhangzhuang/Datasets/tiny-imagenet-200'
+  elif '1080x4-1'==device: root_dataset_dir='/home/zhangzhuang/Datasets/tiny-imagenet-200'
+  elif 'ubuntu204'==device: root_dataset_dir='/media/ubuntu204/F/Dataset/tiny-imagenet-200'
   else: raise Exception('Wrong device')
   args.clean_data=root_dataset_dir
   args.corrupted_data=root_dataset_dir+'-c'
@@ -443,7 +443,7 @@ def main():
     net = models.__dict__[args.model](pretrained=True)
   else:
     logger.info("=> creating model '{}'".format(args.model))
-    net = models.__dict__[args.model]()
+    net = models.__dict__[args.model](num_classes=200)
 
   optimizer = torch.optim.SGD(
       net.parameters(),

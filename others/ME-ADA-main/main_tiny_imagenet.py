@@ -3,7 +3,13 @@ from __future__ import print_function, absolute_import
 import argparse
 
 from model_tiny_imagenet import ModelBaseline, ModelADA, ModelMEADA
+import time
+import os
 
+now = time.strftime("%Y-%m-%d-%H_%M_%S",time.localtime(time.time())) 
+saved_dir=os.path.join('./results',now)
+if not os.path.exists(saved_dir):
+    os.makedirs(saved_dir)
 
 def main():
     train_arg_parser = argparse.ArgumentParser(description="parser")
@@ -29,9 +35,9 @@ def main():
                                   help='Momentum.')
     train_arg_parser.add_argument("--weight_decay", type=float, default=0.0005,
                                   help='')
-    train_arg_parser.add_argument("--logs", type=str, default='logs/',
+    train_arg_parser.add_argument("--logs", type=str, default=saved_dir,
                                   help='')
-    train_arg_parser.add_argument("--model_path", type=str, default='',
+    train_arg_parser.add_argument("--model_path", type=str, default=saved_dir,
                                   help='')
     train_arg_parser.add_argument("--deterministic", type=bool, default=False,
                                   help='')

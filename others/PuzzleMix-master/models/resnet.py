@@ -144,10 +144,10 @@ def resnet34():
     """
     return ResNet(BasicBlock, [3, 4, 6, 3])
 
-def resnet50():
+def resnet50(num_classes=10):
     """ return a ResNet 50 object
     """
-    return ResNet(BottleNeck, [3, 4, 6, 3])
+    return ResNet(BottleNeck, [3, 4, 6, 3],num_classes=num_classes)
 
 def resnet101():
     """ return a ResNet 101 object

@@ -415,13 +415,13 @@ def main():
   ])
 
   device=socket.gethostname()
-  if 'estar-403'==device: root_dataset_dir='/home/estar/Datasets/ILSVRC2012-100'
-  elif 'Jet'==device: root_dataset_dir='/mnt/sdb/zhangzhuang/Datasets/ILSVRC2012-100'
-  elif '1080x4-1'==device: root_dataset_dir='/home/zhangzhuang/Datasets/ILSVRC2012-100'
-  elif 'ubuntu204'==device: root_dataset_dir='/media/ubuntu204/F/DatasetILSVRC2012-100'
+  if 'estar-403'==device: root_dataset_dir='/home/estar/Datasets/ILSVRC2012-10'
+  elif 'Jet'==device: root_dataset_dir='/mnt/sdb/zhangzhuang/Datasets/ILSVRC2012-10'
+  elif '1080x4-1'==device: root_dataset_dir='/home/zhangzhuang/Datasets/ILSVRC2012-10'
+  elif 'ubuntu204'==device: root_dataset_dir='/media/ubuntu204/F/Dataset/ILSVRC2012-10'
   else: raise Exception('Wrong device')
   args.clean_data=root_dataset_dir
-  args.corrupted_data=root_dataset_dir+'-C'
+  args.corrupted_data=root_dataset_dir+'-c'
 
   traindir = os.path.join(args.clean_data, 'train')
   valdir = os.path.join(args.clean_data, 'val')

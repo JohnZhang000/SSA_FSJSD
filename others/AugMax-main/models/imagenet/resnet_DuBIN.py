@@ -221,7 +221,7 @@ def ResNet18_DuBIN():
     return ResNet(BasicBlock_DuBIN, [2, 2, 2, 2])
 
 
-def ResNet50_DuBIN():
+def ResNet50_DuBIN(num_classes=1000):
     r"""ResNet-50 model from
     `"Deep Residual Learning for Image Recognition" <https://arxiv.org/pdf/1512.03385.pdf>`_.
 
@@ -229,7 +229,7 @@ def ResNet50_DuBIN():
         pretrained (bool): If True, returns a model pre-trained on ImageNet
         progress (bool): If True, displays a progress bar of the download to stderr
     """
-    return ResNet(Bottleneck_DuBIN, [3, 4, 6, 3])
+    return ResNet(Bottleneck_DuBIN, [3, 4, 6, 3],num_classes=num_classes)
 
 
 

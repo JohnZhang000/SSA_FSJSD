@@ -24,7 +24,7 @@ import os, shutil
 def tiny_imagenet_dataloaders(data_dir, transform_train=True, AugMax=None, **AugMax_args):
     
     train_root = os.path.join(data_dir, 'train')  # this is path to training images folder
-    validation_root = os.path.join(data_dir, 'val/images')  # this is path to validation images folder
+    validation_root = os.path.join(data_dir, 'val')  # this is path to validation images folder
     print('Training images loading from %s' % train_root)
     print('Validation images loading from %s' % validation_root)
     

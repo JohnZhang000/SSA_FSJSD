@@ -23,8 +23,15 @@ from models.allconv import AllConvNet
 from models.third_party.ResNeXt_DenseNet.models.densenet import densenet
 from models.third_party.ResNeXt_DenseNet.models.resnext import resnext29
 from models.third_party.WideResNet_pytorch.wideresnet import WideResNet
+from models.resnet import resnet50
 from torchvision import datasets, transforms
+import torch.nn.functional as F
+import socket
 
+now = time.strftime("%Y-%m-%d-%H_%M_%S",time.localtime(time.time())) 
+saved_dir=os.path.join('./results',now)
+if not os.path.exists(saved_dir):
+    os.makedirs(saved_dir)
 
 model_names = sorted(
     name for name in models.__dict__
@@ -45,6 +52,7 @@ def str2bool(v):
 parser = argparse.ArgumentParser(description='Train Classifier with mixup',
                                  formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 # Data
+
 parser.add_argument('--dataset',
                     type=str,
                     default='cifar10',
@@ -52,11 +60,11 @@ parser.add_argument('--dataset',
                     help='Choose between Cifar10/100 and Tiny-ImageNet.')
 parser.add_argument('--data_dir',
                     type=str,
-                    default='cifar10',
+                    default='tiny-imagenet-200',
                     help='file where results are to be written')
 parser.add_argument('--root_dir',
                     type=str,
-                    default='experiments',
+                    default=saved_dir,#'experiments',
                     help='folder where results are to be stored')
 parser.add_argument('--labels_per_class',
                     type=int,
@@ -72,7 +80,7 @@ parser.add_argument('--valid_labels_per_class',
 # Model
 parser.add_argument('--arch',
                     metavar='ARCH',
-                    default='wrn28_10',
+                    default='resnet50',
                     choices=model_names,
                     help='model architecture: ' + ' | '.join(model_names) + ' (default: wrn28_10)')
 parser.add_argument('--initial_channels', type=int, default=64, choices=(16, 64))
@@ -183,12 +191,17 @@ torch.cuda.manual_seed_all(args.seed)
 
 cudnn.benchmark = True
 
-CORRUPTIONS = [
+CORRUPTIONS_CIFAR = [
     'defocus_blur', 'glass_blur', 'motion_blur', 'zoom_blur',
     'contrast', 'elastic_transform', 'jpeg_compression', 'pixelate',
     'gaussian_noise', 'impulse_noise',  'shot_noise', 
     'brightness', 'fog', 'frost','snow',
-    'gaussian_blur', 'saturate', 'spatter', 'speckle_noise'
+]
+CORRUPTIONS_IMAGENET = [
+    'noise/gaussian_noise', 'noise/shot_noise', 'noise/impulse_noise', 
+    'blur/defocus_blur', 'blur/glass_blur', 'blur/motion_blur', 'blur/zoom_blur', 
+    'weather/snow', 'weather/frost', 'weather/fog', 'weather/brightness', 
+    'digital/contrast', 'digital/elastic_transform', 'digital/pixelate', 'digital/jpeg_compression',
 ]
 
 def test_my(net, test_loader):
@@ -208,7 +221,7 @@ def test_my(net, test_loader):
 
   return total_correct1/len(test_loader.dataset), total_correct5/len(test_loader.dataset)
 
-def test_cifar_c(net, dataset):
+def test_cifar_c(net, dataset,log):
     """Evaluate network on given corrupted dataset."""
     corruption_acc1s = []
     corruption_acc5s = []
@@ -231,7 +244,7 @@ def test_cifar_c(net, dataset):
         test_data = datasets.CIFAR100(dataset,train=False,transform=test_transform,download=True)
         num_classes = 100
 
-    for corruption in CORRUPTIONS:
+    for corruption in CORRUPTIONS_CIFAR:
         # Reference to original data is mutated
         test_data.data = np.load(dataset+'-c' + corruption + '.npy')
         test_data.targets = torch.LongTensor(np.load(dataset+'-c' + 'labels.npy'))
@@ -246,11 +259,11 @@ def test_cifar_c(net, dataset):
         acc1, acc5 = test_my(net, test_loader_c)
         corruption_acc1s.append(acc1)
         corruption_acc5s.append(acc5)
-        print('{} * Acc@1 {:.3f} Acc@5 {:.3f}'.format(corruption, acc1, acc5))
-    print('Corruption 15* Acc@1 {:.3f} Acc@5 {:.3f}'.format(np.mean(corruption_acc1s[0:15]), np.mean(corruption_acc5s[0:15])))
+        print_log('{} * Acc@1 {:.3f} Acc@5 {:.3f}'.format(corruption, acc1, acc5),log)
+    print_log('Corruption 15* Acc@1 {:.3f} Acc@5 {:.3f}'.format(np.mean(corruption_acc1s), np.mean(corruption_acc5s)),log)
 
 
-def test_tiny_imagenet_c(net, dataset):
+def test_tiny_imagenet_c(net, dataset,log):
     """Evaluate network on given corrupted dataset."""
     corruption_acc1s = []
     corruption_acc5s = []
@@ -264,7 +277,7 @@ def test_tiny_imagenet_c(net, dataset):
     # test_data = datasets.ImageFolder(validation_root, transform=test_transform)
     # num_classes = 200
 
-    for corruption in CORRUPTIONS:
+    for corruption in CORRUPTIONS_IMAGENET:
         # Reference to original data is mutated
         for s in range(1,6):
             valdir = os.path.join(dataset+'-c', corruption, str(s))
@@ -278,8 +291,8 @@ def test_tiny_imagenet_c(net, dataset):
             acc1, acc5 = test_my(net, test_loader_c)
             corruption_acc1s.append(acc1)
             corruption_acc5s.append(acc5)
-            print.info('{} * Acc@1 {:.3f} Acc@5 {:.3f}'.format(corruption, acc1, acc5))
-    print.info('Corruption 15* Acc@1 {:.3f} Acc@5 {:.3f}'.format(np.mean(corruption_acc1s[0:15]), np.mean(corruption_acc5s[0:15])))
+            print_log('{} * Acc@1 {:.3f} Acc@5 {:.3f}'.format(corruption, acc1, acc5),log)
+    print_log('Corruption 15* Acc@1 {:.3f} Acc@5 {:.3f}'.format(np.mean(corruption_acc1s), np.mean(corruption_acc5s)),log)
 
 def experiment_name_non_mnist(dataset=args.dataset,
                               arch=args.arch,
@@ -609,6 +622,18 @@ def main():
     print_log("cudnn  version : {}".format(torch.backends.cudnn.version()), log)
 
     # dataloader
+    device=socket.gethostname()
+    if 'estar-403'==device: root_dataset_dir='/home/estar/Datasets'
+    elif 'Jet'==device: root_dataset_dir='/mnt/sdb/zhangzhuang/Datasets'
+    elif '1080x4-1'==device: root_dataset_dir='/home/zhangzhuang/Datasets'
+    elif 'ubuntu204'==device: root_dataset_dir='/media/ubuntu204/F/Dataset'
+    else: raise Exception('Wrong device')
+
+    if 'cifar10'==args.dataset: args.data_dir=os.path.join(root_dataset_dir,'cifar-10')
+    elif 'cifar100'==args.dataset: args.data_dir=os.path.join(root_dataset_dir,'cifar-100')
+    elif 'tiny-imagenet-200'==args.dataset: args.data_dir=os.path.join(root_dataset_dir,'tiny-imagenet-200')
+    else: raise Exception('Wrong dataset')
+
     train_loader, valid_loader, _, test_loader, num_classes = load_data_subset(
         args.batch_size,
         2,
@@ -644,14 +669,16 @@ def main():
     print_log("=> creating model '{}'".format(args.arch), log)
     # net = models.__dict__[args.arch](num_classes, args.dropout, stride).cuda()
     args.num_classes = num_classes
-    if args.model == 'densenet':
+    if args.arch == 'densenet':
         net = densenet(num_classes=num_classes)
-    elif args.model == 'wrn':
+    elif args.arch == 'wrn':
         net = WideResNet(args.layers, num_classes, args.widen_factor, args.droprate)
-    elif args.model == 'allconv':
+    elif args.arch == 'allconv':
         net = AllConvNet(num_classes)
-    elif args.model == 'resnext':
+    elif args.arch == 'resnext':
         net = resnext29(num_classes=num_classes)
+    elif args.arch == 'resnet50':
+        net = resnet50(num_classes=num_classes)
 
     net = torch.nn.DataParallel(net, device_ids=list(range(args.ngpu)))
     optimizer = torch.optim.SGD(net.parameters(),
@@ -763,9 +790,9 @@ def main():
                                                                     acc_var), log)
 
     if 'tiny-imagenet' in args.dataset:
-        test_tiny_imagenet_c(net,args.dataset)
+        test_tiny_imagenet_c(net,args.dataset,log)
     else:
-        test_cifar_c(net,args.dataset)
+        test_cifar_c(net,args.dataset,log)
     if not args.log_off:
         log.close()
 

@@ -151,7 +151,7 @@ class TINY_IMAGENETD(object):
 
         pin_memory = True if use_gpu else False
 
-        data_root = os.path.join(dataroot, 'tiny-imagenet')
+        data_root = os.path.join(dataroot, 'tiny-imagenet-200')
 
         # trainset = CIFAR100(root=data_root, train=True, download=True, transform=train_transform)
         trainset = ImageFolder(data_root+'/train', train_transform)
@@ -176,7 +176,7 @@ class TINY_IMAGENETD(object):
                                 'weather/snow', 'weather/frost', 'weather/fog', 'weather/brightness', 
                                 'digital/contrast', 'digital/elastic_transform', 'digital/pixelate', 'digital/jpeg_compression',]
 
-            data_root = os.path.join(dataroot, 'tiny-imagenet-c')
+            data_root = os.path.join(dataroot, 'tiny-imagenet-200-c')
             for key in self.out_keys:
                 for i in range(1,6):
                     outset = ImageFolder(os.path.join(data_root,key,str(i)), test_transform)
@@ -186,4 +186,4 @@ class TINY_IMAGENETD(object):
                     )
                     self.out_loaders[key+'_'+str(i)] = out_loader
 
-        self.num_classes = 1000
+        self.num_classes = 200
