@@ -14,7 +14,9 @@ from models.wideresnet import WideResNet
 from models.resnet import resnet50
 from common.utils import fix_all_seed, write_log, sgd, entropy_loss
 import socket
+import shutil
 import torch.nn as nn
+from PIL import Image
 
 CORRUPTIONS = [
     'noise/gaussian_noise', 'noise/shot_noise', 'noise/impulse_noise', 
@@ -23,6 +25,25 @@ CORRUPTIONS = [
     'digital/contrast', 'digital/elastic_transform', 'digital/pixelate', 'digital/jpeg_compression',
 ]
 
+def write_images(root_dir,images,labels):
+    for i in range(len(images)):
+        image = images[i]
+        label = labels[i]
+        saved_dir=os.path.join(root_dir,str(label))
+        if not os.path.exists(saved_dir):
+            os.makedirs(saved_dir)
+        image_name = '{}_{}.png'.format(label,i)
+        image_path = os.path.join(saved_dir,image_name)
+        image = np.transpose(image,(1,2,0))
+        # image = image.astype(np.uint8)
+        image = image[:,:,::-1]
+        image = image.astype(np.uint8)
+        image = image.transpose((2,0,1))
+        image = Image.fromarray(image)
+        image.save(image_path)
+        # image = image.tobytes()
+        # with open(image_path,'wb') as f:
+        #     f.write(image)
 
 class Denormalise(transforms.Normalize):
     """
@@ -89,6 +110,7 @@ class ModelBaseline(object):
         elif '1080x4-1'==device: root_folder='/home/zhangzhuang/Datasets/tiny-imagenet-200'
         elif 'ubuntu204'==device: root_folder='/media/ubuntu204/F/Dataset/tiny-imagenet-200'
         else: raise Exception('Wrong device')
+        flags.root_folder = root_folder
         if not os.path.exists(flags.logs):
             os.makedirs(flags.logs)
 
@@ -329,8 +351,14 @@ class ModelADA(ModelBaseline):
             if ((epoch + 1) % flags.epochs_min == 0) and (counter_k < flags.k):  # if T_min iterations are passed
                 print('Generating adversarial images [iter {}]'.format(counter_k))
                 images, labels = self.maximize(flags)
-                self.train_data.data = np.concatenate([self.train_data.data, images])
-                self.train_data.targets.extend(labels)
+                new_path=os.path.join(flags.root_folder,'ADA','train'+'_e'+str(epoch)+'_k'+str(counter_k))
+                if os.path.exists(new_path):
+                    shutil.rmtree(new_path)
+                write_images(new_path, images, labels)
+                self.train_data_new=datasets.ImageFolder(new_path, self.train_transform)
+                self.train_data=torch.utils.data.ConcatDataset([self.train_data, self.train_data_new])
+                # self.train_data.data = np.concatenate([self.train_data.data, images])
+                # self.train_data.targets.extend(labels)
                 counter_k += 1
 
             self.network.train()
