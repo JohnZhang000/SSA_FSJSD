@@ -6,18 +6,19 @@ import general as g
 import numpy as np
 from tqdm import tqdm
 import torch
-from PIL import Image,ImageColor
-from torch.utils.data import DataLoader
+from PIL import Image#,ImageColor
+# from torch.utils.data import DataLoader
 from skimage.feature import hog
 from sklearn.metrics.pairwise import cosine_similarity
 # from augment_and_mix import augment_and_mix
-from scipy.io import savemat
+from scipy.io import savemat,loadmat
 from skimage.color import rgb2lab,rgb2ycbcr,rgb2luv,rgb2hsv
-from sklearn.decomposition import PCA #大数据的包实现主成分分析
-import joblib
+# from sklearn.decomposition import PCA #大数据的包实现主成分分析
+# import joblib
 import json
 import shutil
-
+from scipy.stats import pearsonr
+import sys
 
 def get_vec_sim(arrays1,arrays2):
     assert(2==len(arrays1.shape))
@@ -41,37 +42,6 @@ def get_hog(imgs):
     features=np.vstack(features)
     return features
 
-# def get_spectrum(imgs):
-#     # images_ycbcr=g.rgb_to_ycbcr(imgs)
-#     images_dct=g.img2dct(imgs)
-#     # images_dct=g.img2dct_4part(images_ycbcr)
-#     return images_dct
-
-def get_spectrum_tc(imgs):
-    # images_dct=g.img2dct(imgs)
-    # L2s=np.linalg.norm(images_dct,axis=(-1,-2))
-    imgs=torch.tensor(imgs)
-    images_dct=torch.fft.fft2(imgs)
-    images_dct=torch.fft.fftshift(images_dct)
-    images_dct=torch.log(1+torch.abs(images_dct.real))
-    return images_dct.numpy()
-
-# def get_spectrum_mag_pha(clean_imgs):
-#     assert(4==len(clean_imgs.shape))
-#     assert(clean_imgs.shape[2]==clean_imgs.shape[3])
-#     clean_imgs=clean_imgs.transpose(0,2,3,1)
-#     n = clean_imgs.shape[0]
-#     c = clean_imgs.shape[3]
-    
-#     block_dct=np.zeros_like(clean_imgs)
-#     for i in range(n):
-#         for j in range(c):
-#             ch_block_cln=clean_imgs[i,:,:,j]                   
-#             block_cln_tmp = np.log(1+np.abs(dct2(ch_block_cln)))
-#             block_dct[i,:,:,j]=block_cln_tmp
-#     block_dct=block_dct.transpose(0,3,1,2)
-#     return block_dct
-
 def cvt_color(img):
     img=img.convert('RGB')
     img=np.array(img)
@@ -83,39 +53,6 @@ def cvt_color(img):
     
     img=img.transpose(2,0,1)
     return img/255.0
-
-# def compare_spectrum_tc(dataset_setting_clean,dataset_setting_crupt,file_names,saved_dir):
-#     # 计算干净图像的频谱
-#     image_shape=dataset_setting_clean.input_shape
-#     image_num=len(file_names)
-#     images_clean=np.zeros([image_num,image_shape[0],image_shape[1],image_shape[2]])
-#     for i,file_name in enumerate(file_names):
-#         image_tmp=Image.open(os.path.join(dataset_setting_clean.dataset_dir,'val',file_name)).resize([image_shape[1],image_shape[2]])
-#         image_tmp=cvt_color(image_tmp)
-#         images_clean[i,...]=image_tmp#/255.0
-#     images_clean=get_spectrum_tc(images_clean)
-
-#     # 计算损坏图像的频谱差
-#     for level in range(5):
-#         my_mat={}
-#         for i,dataset_dir in enumerate(dataset_setting_crupt.dataset_dir):
-#             if '/'+str(level+1) not in dataset_dir:
-#                 continue
-#             images_crupt=np.zeros_like(images_clean)
-#             crupt_name='_'.join(dataset_dir.split('/')[-3:])
-#             saved_dir_tmp=os.path.join(saved_dir,crupt_name)
-#             for j,file_name in enumerate(file_names):
-#                 image_tmp=Image.open(os.path.join(dataset_dir,file_name)).resize([image_shape[1],image_shape[2]])
-#                 image_tmp=cvt_color(image_tmp)
-#                 images_crupt[j,...]=image_tmp#/255.0
-#             images_crupt=get_spectrum_tc(images_crupt)
-#             images_diff=(images_crupt-images_clean)
-#             images_diff=np.mean(images_diff,axis=0)/(images_clean.mean(axis=0)+g.epsilon)
-#             g.save_images_channel(saved_dir_tmp,images_diff)
-
-#             for k in range(images_diff.shape[0]):
-#                 my_mat[crupt_name[:-2]+'_c'+str(k)]=images_diff[k,...]
-#         savemat(os.path.join(saved_dir,'corruptions_'+str(level+1)+'.mat'),my_mat)
 
 def compare_spectrum(dataset_setting_clean,dataset_setting_crupt,file_names,saved_dir):
     # 计算干净图像的频谱
@@ -148,129 +85,6 @@ def compare_spectrum(dataset_setting_clean,dataset_setting_crupt,file_names,save
                 my_mat[str(level+1)+'_c'+str(k)]=images_diff[k,...]
         savemat(os.path.join(saved_dir,crupt_name[:-2]+'.mat'),my_mat)
         logger.info('Finish {} with {}'.format(crupt_name[:-2],'spectrums'))
-
-# def compare_spectrum_pixel(dataset_setting_clean,dataset_setting_crupt,file_names,saved_dir):
-#     # 计算干净图像的频谱
-#     image_shape=dataset_setting_clean.input_shape
-#     image_num=len(file_names)
-#     images_clean=np.zeros([image_num,image_shape[0],image_shape[1],image_shape[2]])
-#     for i,file_name in enumerate(file_names):
-#         image_tmp=Image.open(os.path.join(dataset_setting_clean.dataset_dir,'val',file_name)).resize([image_shape[1],image_shape[2]])
-#         image_tmp=cvt_color(image_tmp)
-#         images_clean[i,...]=image_tmp#/255.0
-#     images_clean_spectrum=get_spectrum(images_clean)
-
-#     # 计算损坏图像的频谱差
-#     my_mat={}
-#     my_std={}
-#     for i,dataset_dir in enumerate(tqdm(dataset_setting_crupt.dataset_dir)):
-#         images_crupt=np.zeros_like(images_clean)
-#         crupt_name='_'.join(dataset_dir.split('/')[-3:])
-#         saved_dir_tmp=os.path.join(saved_dir,crupt_name)
-#         for j,file_name in enumerate(file_names):
-#             image_tmp=Image.open(os.path.join(dataset_dir,file_name)).resize([image_shape[1],image_shape[2]])
-#             image_tmp=cvt_color(image_tmp)
-#             images_crupt[j,...]=image_tmp#/255.0
-#         images_diff=images_crupt-images_clean
-#         images_diff=get_spectrum(images_diff)
-#         images_std=images_diff.std(axis=0)/(images_clean_spectrum.mean(axis=0)+g.epsilon)
-#         images_mean=images_diff.mean(axis=0)/(images_clean_spectrum.mean(axis=0)+g.epsilon)
-
-#         for k in range(images_mean.shape[0]):
-#             my_mat[crupt_name+'_c'+str(k)]=images_mean[k,...]
-#             my_std[crupt_name+'_c'+str(k)]=images_std[k,...]
-#     savemat(os.path.join(saved_dir,'corruptions.mat'),my_mat)
-#     savemat(os.path.join(saved_dir,'corruptions_std.mat'),my_std)
-
-# def spectrum_pca(dataset_setting_clean,dataset_setting_crupt,file_names,saved_dir):
-#     # 计算干净图像的频谱
-#     image_shape=dataset_setting_clean.input_shape
-#     image_num=len(file_names)
-#     images_clean=np.zeros([image_num,image_shape[0],image_shape[1],image_shape[2]])
-#     for i,file_name in enumerate(file_names):
-#         image_tmp=Image.open(os.path.join(dataset_setting_clean.dataset_dir,'val',file_name)).resize([image_shape[1],image_shape[2]])
-#         image_tmp=cvt_color(image_tmp)
-#         images_clean[i,...]=image_tmp#/255.0
-#     images_clean=get_spectrum(images_clean)
-#     np.save(os.path.join(saved_dir,'spectrum_clean.npy'),images_clean)
-
-#     # 计算损坏图像的频谱差
-#     spectrum_diffs=[]
-#     skiped=['gaussian_noise', 'impulse_noise',  'shot_noise', 'speckle_noise','contrast']
-#     for i,dataset_dir in enumerate(tqdm(dataset_setting_crupt.dataset_dir)):
-#         images_crupt=np.zeros_like(images_clean)
-#         crupt_name='_'.join(dataset_dir.split('/')[-3:])
-#         flag_skip=False
-#         for skip_name in skiped:
-#             if skip_name in crupt_name:
-#                 flag_skip=True
-#                 break
-#         if flag_skip:
-#             continue
-#         saved_dir_tmp=os.path.join(saved_dir,crupt_name)
-#         for j,file_name in enumerate(file_names):
-#             image_tmp=Image.open(os.path.join(dataset_dir,file_name)).resize([image_shape[1],image_shape[2]])
-#             image_tmp=cvt_color(image_tmp)
-#             images_crupt[j,...]=image_tmp#/255.0
-#         images_crupt=get_spectrum(images_crupt)
-#         images_diff=(images_crupt-images_clean)/images_clean
-#         spectrum_diffs.append(images_diff)
-#     spectrum_diffs=np.vstack(spectrum_diffs)
-#     np.save(os.path.join(saved_dir,'spectrum_diffs.npy'),spectrum_diffs)
-#     spectrum_diffs=np.load(os.path.join(saved_dir,'spectrum_diffs.npy'))
-
-#     for i in range(spectrum_diffs.shape[1]):
-#         spectrum_tmp=spectrum_diffs[:,i,...]
-#         spectrum_tmp=spectrum_tmp.reshape([spectrum_tmp.shape[0],-1])
-#         pca=PCA(n_components='mle',whiten=True).fit(spectrum_tmp)#'mle'
-#         print('PCA {} n_components:{}'.format(i,pca.n_components_))
-#         print('PCA {} components_shape:{}'.format(i,pca.components_.shape))
-#         print('PCA {} explained_variance:{}'.format(i,pca.explained_variance_))
-#         print('PCA {} explained_variance_ratio:{}'.format(i,pca.explained_variance_ratio_))
-#         print('PCA {} noise_variance:{}'.format(i,pca.noise_variance_))
-#         joblib.dump(pca, os.path.join(saved_dir,'pca_'+str(i)+'.pkl'))
-    
-
-# def compare_features(compare_type,dataset_setting_clean,dataset_setting_crupt,file_names,saved_dir):
-#     # 计算干净图像的频谱
-#     image_shape=dataset_setting_clean.input_shape
-#     image_num=len(file_names)
-#     images_clean=np.zeros([image_num,image_shape[0],image_shape[1],image_shape[2]])
-#     for i,file_name in enumerate(file_names):
-#         image_tmp=Image.open(os.path.join(dataset_setting_clean.dataset_dir,'val',file_name)).resize([image_shape[1],image_shape[2]])
-#         image_tmp=image_tmp.convert('RGB')
-#         image_tmp=np.array(image_tmp).transpose(2,0,1)
-#         images_clean[i,...]=image_tmp/255.0
-#     if 'spectrum'==compare_type:
-#         features_clean=get_spectrum(images_clean)
-#     elif 'hog'==compare_type:
-#         features_clean=get_hog(images_clean)
-#     logger.info('Finish {} with {}'.format('cleans',compare_type))
-
-#     # 计算损坏图像的频谱差
-#     for i,dataset_dir in enumerate(dataset_setting_crupt.dataset_dir):
-#         images_crupt=np.zeros_like(images_clean)
-#         crupt_name='_'.join(dataset_dir.split('/')[-3:])
-#         saved_dir_tmp=os.path.join(saved_dir,crupt_name)
-#         if not os.path.exists(saved_dir_tmp):
-#             os.makedirs(saved_dir_tmp)
-#         for j,file_name in enumerate(file_names):
-#             image_tmp=Image.open(os.path.join(dataset_dir,file_name)).resize([image_shape[1],image_shape[2]])
-#             image_tmp=image_tmp.convert('RGB')
-#             image_tmp=np.array(image_tmp).transpose(2,0,1)
-#             images_crupt[j,...]=image_tmp/255.0
-#         if 'spectrum'==compare_type:
-#             features_crupt=get_spectrum(images_crupt)
-#             # 保存对比结果
-#             features_diff=features_crupt-features_clean
-#             features_diff=np.mean(features_diff,axis=0)
-#             g.save_images_channel(saved_dir_tmp,features_diff)
-
-#         elif 'hog'==compare_type:
-#             features_crupt=get_hog(images_crupt)
-#             sims=get_vec_sim(features_crupt,features_clean)
-#             np.savetxt(os.path.join(saved_dir_tmp,'hog.txt'),sims)
-#         logger.info('Finish {} with {}'.format(crupt_name,compare_type))
 
 def get_features(model,images,batch_size):
     image_num=images.shape[0]
@@ -391,39 +205,6 @@ def compare_acc(model,dataset_setting_clean,dataset_setting_crupt,file_names,lab
         savemat(os.path.join(saved_dir,crupt_name[:-2]+'.mat'),my_mat)
         logger.info('Finish {} with {}'.format(crupt_name[:-2],'acc'))
 
-
-# def compare_features_augmix(dataset_setting_clean,severity,width,depth,alpha,file_names,saved_dir):
-#     # 计算干净图像的频谱
-#     image_shape=dataset_setting_clean.input_shape
-#     image_num=len(file_names)
-#     images_clean=np.zeros([image_num,image_shape[0],image_shape[1],image_shape[2]])
-#     for i,file_name in enumerate(tqdm(file_names)):
-#         image_tmp=Image.open(os.path.join(dataset_setting_clean.dataset_dir,'val',file_name)).resize([image_shape[1],image_shape[2]])
-#         image_tmp=image_tmp.convert('RGB')
-#         image_tmp=np.array(image_tmp).transpose(2,0,1)
-#         images_clean[i,...]=image_tmp/255.0
-#     features_clean=get_hog(images_clean)
-#     logger.info('Finish {}'.format('cleans'))
-
-#     images_crupt=np.zeros_like(images_clean)
-#     for j in tqdm(range(images_clean.shape[0])):
-#         image_tmp=images_clean[j,...].transpose(1,2,0)
-#         image_tmp=augment_and_mix(image_tmp,severity,width,depth,alpha)
-#         images_crupt[j,...]=image_tmp.transpose(2,0,1)
-#     features_crupt=get_hog(images_crupt)
-#     setting_name='s'+str(severity)+'_w'+str(width)+'_d'+str(depth)+'_a'+str(alpha)
-#     logger.info('Finish {}'.format(setting_name))
-
-#     sims=get_vec_sim(features_crupt,features_clean)
-#     saved_dir_tmp=os.path.join(saved_dir,'augmix')
-#     if not os.path.exists(saved_dir_tmp):
-#         os.makedirs(saved_dir_tmp)
-#     np.savetxt(os.path.join(saved_dir_tmp,setting_name+'.txt'),sims)
-
-
-
-
-
 def output_names(dir_src):
     filenames=[]
     for root,dirs,files in os.walk(dir_src):
@@ -449,11 +230,28 @@ def get_labels(file_names):
         labels.append(label)
     return np.vstack(labels)
 
+def compare_correlation(saved_dir,corruption_types):
+    saved_dir_tmp='/'.join(saved_dir.split('/')[:-1])
+    accs=os.listdir(os.path.join(saved_dir_tmp,'acc'))
+    features=os.listdir(os.path.join(saved_dir_tmp,'feature'))
+    assert(len(accs)==len(features))
+    assert(len(accs)==len(corruption_types)+1)
+    cors=np.zeros(20)
+    my_mat={}
+    for i,corruption in enumerate(corruption_types):
+        acc_mat=loadmat(os.path.join(saved_dir_tmp,'acc',corruption.replace('/','_'),'acc.mat'))['acc']
+        feature_mat=loadmat(os.path.join(saved_dir_tmp,'feature',corruption.replace('/','_'),'feature.mat'))['feature']
+        cor=pearsonr(acc_mat.reshape(-1),feature_mat.mean(axis=0))
+        cors[i]=cor[0]
+    my_mat['correlation']=cors.reshape(4,5)
+    savemat(os.path.join(saved_dir,'correlation.mat'),my_mat)
+    np.savetxt(os.path.join(saved_dir,'correlation.txt'),cors.reshape(4,5))
+
 
 '''
 设置
 '''
-job='acc' # 'spectrum' or 'feature' or 'acc'
+job='correlation' # 'spectrum' or 'feature' or 'acc' or 'correlation'
 model_name='resnet50_imagenet'
 num_images=1000
 os.environ['CUDA_VISIBLE_DEVICES']='0'
@@ -516,6 +314,8 @@ elif 'feature' == job:
     compare_features(model,data_setting_clean,data_setting_crupt,images_selected,saved_dir)
 elif 'acc' == job:
     compare_acc(model,data_setting_clean,data_setting_crupt,images_selected,labels_selected,saved_dir)
+elif 'correlation' == job:
+    compare_correlation(saved_dir,data_setting_crupt.corruption_types)
 else:
     raise Exception('job must be spectrum or feature or acc')
 logger.info('Finish Calculating')
@@ -523,6 +323,9 @@ logger.info('Finish Calculating')
 '''
 重新整理以便于绘图
 '''
+if 'correlation' == job:
+    sys.exit(0)
+
 for file in os.listdir(saved_dir):
     if not '.mat' in file:
         continue
