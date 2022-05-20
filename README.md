@@ -1,1 +1,1 @@
-# manual_feature_and_deep_feature
+# Code for Mitigating image corruptions by rethinking their frequency bias
