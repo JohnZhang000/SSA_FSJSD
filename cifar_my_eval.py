@@ -46,6 +46,8 @@ import general as g
 import socket
 from scipy.fftpack import dct,idct
 from tqdm import tqdm
+from scipy.io import savemat
+
 from torch.utils.tensorboard import SummaryWriter
 
 now = time.strftime("%Y-%m-%d-%H_%M_%S",time.localtime(time.time())) 
@@ -132,6 +134,7 @@ parser.add_argument(
     '-r',
     type=str,
     default='./snapshots_std/checkpoint.pth.tar',
+    # default='./results/2022-08-19-09_57_53/checkpoint.pth.tar',
     help='Checkpoint path for resume / test.')
 parser.add_argument('--evaluate', action='store_true', help='Eval only.')
 parser.add_argument(
@@ -328,8 +331,9 @@ def dct2img(dct_imgs,signs):
     images=np.zeros_like(dct_imgs)
     for i in range(n):
         for j in range(c):
-            ch_block_cln=dct_imgs[i,:,:,j]-1
-            ch_block_cln=np.exp(ch_block_cln)
+            ch_block_cln=dct_imgs[i,:,:,j]#-1
+            # ch_block_cln=np.exp(ch_block_cln)
+            ch_block_cln=idct2(ch_block_cln)
             images[i,:,:,j]=ch_block_cln
     images=images.transpose(0,3,1,2)
     return images
@@ -491,10 +495,13 @@ def test_pair(net, test_loader):
 
 def get_fourier_base(images,signs,position):
   noise=np.zeros_like(images)
-  noise[:,position[0],position[1],position[2]]=1
+  noise[:,:,position[1],position[2]]=1
   noise=dct2img(noise,signs)
-  noise=noise/np.linalg.norm(noise,ord=2,axis=(-1,-2),keepdims=True)
-  # noise=noise*4
+
+  norm=np.linalg.norm(noise,ord=2,axis=(-1,-2),keepdims=False)
+  norm=np.expand_dims(norm,(2,3))
+  noise=noise/norm
+  noise=noise*4
   return noise
 
 def add_noise(images,position):
@@ -503,11 +510,12 @@ def add_noise(images,position):
   images_dct,signs=img2dct(images_ycbcr)
   noise_ycbcr=get_fourier_base(images_dct,signs,position)
 
-  adds=np.random.randn(images.shape[0])
+  adds=np.random.randn(images.shape[0],images.shape[1])
   adds[adds<0.5]=-1
   adds[adds>=0.5]=1
+  adds=np.expand_dims(adds,(2,3))
 
-  images_ret=images_ycbcr+adds[:,None,None,None]*noise_ycbcr
+  images_ret=images_ycbcr+adds*noise_ycbcr
   images_ret=g.ycbcr_to_rgb(images_ret.transpose(0,2,3,1))
   images_ret=np.clip(images_ret,0,1)
   images_ret=(images_ret.transpose(0,3,1,2)-0.5)/0.5
@@ -532,7 +540,7 @@ def test_single(net, test_data,position):
       images_noise = add_noise(images.numpy(),position)
       images_noise = torch.from_numpy(images_noise)
       a=images_noise-images
-      print('Diff:{}'.format(a.mean()))
+      # print('Diff:{}'.format(a.mean()))
       images = images_noise.cuda()
       targets = targets.cuda()
       logit = net(images)
@@ -551,7 +559,8 @@ def test_heatmap(net,test_data,map_size):
         for k in range(map_size[2]):
           err=test_single(net,test_data,[i,j,k])
           heatmap[i,j,k]=err
-          pbar.set_description('{}/{}_{}/{}_{}/{}: {}'.format(i,map_size[0],j,map_size[1],k,map_size[2],err))
+          pbar.set_description('{}/{}_{}/{}_{}/{}: {}'.format(i+1,map_size[0],j+1,map_size[1],k+1,map_size[2],err))
+          pbar.update(1)
   return heatmap
 
 def accuracy(output, target, topk=(1,)):
@@ -688,10 +697,12 @@ def main():
   logger.info('Model restored from {}'.format(args.resume))
 
   # acc_cln,acc_aug=test_pair(net, test_loader)
-  map=test_heatmap(net, test_data,[3,32,32])
+  map=test_heatmap(net, test_data,[1,32,32])
   my_mat={}
   for i in range(map.shape[0]):
     my_mat[str(i)]=map[i,...]
+    np.savetxt(os.path.join(saved_dir,'spectrum'+str(i)+'.txt'),map[i,...])
+  savemat(os.path.join(saved_dir,'spectrum.mat'),my_mat)
   # logger.info('Acc@cln {:.3f} Acc@aug {:.3f}'.format(acc_cln, acc_aug))
   return
 
