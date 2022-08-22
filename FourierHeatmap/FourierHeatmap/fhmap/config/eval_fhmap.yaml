@@ -1,0 +1,8 @@
+defaults:
+  - arch: allconv
+  - dataset: cifar10
+  - env: default
+
+hydra:
+  run:
+    dir: ${env.savedir}/${hydra.job.name}/${now:%Y-%m-%d_%H-%M-%S}
