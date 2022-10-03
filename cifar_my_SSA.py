@@ -94,12 +94,12 @@ parser.add_argument(
 # AugMix options
 parser.add_argument(
     '--mixture-width',
-    default=3,
+    default=1,
     type=int,
     help='Number of augmentation chains to mix per augmented example')
 parser.add_argument(
     '--mixture-depth',
-    default=4,
+    default=8,
     type=int,
     help='Depth of augmentation chains. -1 denotes stochastic depth in [1, 3]')
 parser.add_argument(
@@ -155,43 +155,43 @@ parser.add_argument(
 parser.add_argument(
     '--contrast_scale',
     type=float,
-    default=1.0,
+    default=2.0,
     help='r thresh for impulse noise')
 parser.add_argument(
     '--noise_scale',
     type=float,
     default=0.5,
     help='r thresh for impulse noise')
-parser.add_argument(
-    '--topk',
-    type=float,
-    default=0.5,
-    help='r thresh for impulse noise')
-parser.add_argument(
-    '--topk_epoch',
-    type=float,
-    default=0.6,
-    help='r thresh for impulse noise')
-parser.add_argument(
-    '--no_fsim',
-    '-nfs',
-    action='store_true',
-    help='Turn off feature similiarity loss.')
-parser.add_argument(
-    '--no_topk',
-    '-ntk',
-    action='store_true',
-    help='Turn off topk loss.')
-parser.add_argument(
-    '--no_timei',
-    '-nti',
-    action='store_true',
-    help='Turn off time invariant loss.')
-parser.add_argument(
-    '--alpha',
-    type=float,
-    default=3.0,
-    help='r thresh for impulse noise')
+# parser.add_argument(
+#     '--topk',
+#     type=float,
+#     default=0.5,
+#     help='r thresh for impulse noise')
+# parser.add_argument(
+#     '--topk_epoch',
+#     type=float,
+#     default=0.6,
+#     help='r thresh for impulse noise')
+# parser.add_argument(
+#     '--no_fsim',
+#     '-nfs',
+#     action='store_true',
+#     help='Turn off feature similiarity loss.')
+# parser.add_argument(
+#     '--no_topk',
+#     '-ntk',
+#     action='store_true',
+#     help='Turn off topk loss.')
+# parser.add_argument(
+#     '--no_timei',
+#     '-nti',
+#     action='store_true',
+#     help='Turn off time invariant loss.')
+# parser.add_argument(
+#     '--alpha',
+#     type=float,
+#     default=3.0,
+#     help='r thresh for impulse noise')
 parser.add_argument(
     '--seed',
     type=int,
@@ -202,8 +202,8 @@ args = parser.parse_args()
 augmentations.IMPULSE_THRESH = args.imp_thresh
 augmentations.CONTRAST_SCALE = args.contrast_scale
 augmentations.NOISE_SCALE = args.noise_scale
-TOPK=args.topk
-TOPk_EPOCH=int(args.topk_epoch*args.epochs)
+# TOPK=args.topk
+# TOPk_EPOCH=int(args.topk_epoch*args.epochs)
 
 CORRUPTIONS = [
     'defocus_blur', 'glass_blur', 'motion_blur', 'zoom_blur',
@@ -274,13 +274,13 @@ class AugMixDataset(torch.utils.data.Dataset):
   def __len__(self):
     return len(self.dataset)
 
-def select_topk(p_y,y):
-    target_onehot=torch.zeros_like(p_y).scatter_(1, y.reshape(-1,1), 1)
-    target_logits=torch.sum(p_y*target_onehot,axis=1)
-    n_correct=torch.sum((target_logits>0.5))
-    topk_aug1=target_logits.topk(int(TOPK*(len(y)-n_correct)+n_correct),dim=0)[0][-1]
-    topk=target_logits>topk_aug1
-    return topk
+# def select_topk(p_y,y):
+#     target_onehot=torch.zeros_like(p_y).scatter_(1, y.reshape(-1,1), 1)
+#     target_logits=torch.sum(p_y*target_onehot,axis=1)
+#     n_correct=torch.sum((target_logits>0.5))
+#     topk_aug1=target_logits.topk(int(TOPK*(len(y)-n_correct)+n_correct),dim=0)[0][-1]
+#     topk=target_logits>topk_aug1
+#     return topk
 
 def train(net, train_loader, optimizer, scheduler):
   """Train for one epoch."""
@@ -307,16 +307,16 @@ def train(net, train_loader, optimizer, scheduler):
     p_mixture = torch.clamp((p_clean + p_aug1 + p_aug2) / 3., 1e-7, 1).log()
 
     # with feature similarity
-    if not args.no_fsim:
-      features_clean=features_clean.reshape(n_img,-1)
-      features_aug1=features_aug1.reshape(n_img,-1)
-      features_aug2=features_aug2.reshape(n_img,-1)
+    # if not args.no_fsim:
+    #   features_clean=features_clean.reshape(n_img,-1)
+    #   features_aug1=features_aug1.reshape(n_img,-1)
+    #   features_aug2=features_aug2.reshape(n_img,-1)
 
-      features_clean_mean=features_clean#torch.mean(features_clean,dim=0).reshape(1,-1).repeat_interleave(n_img,dim=0)
-      sim_aug1=F.cosine_similarity(features_clean_mean,features_aug1,axis=-1).cuda()
-      sim_aug2=F.cosine_similarity(features_clean_mean,features_aug2,axis=-1).cuda()
-      scale_aug1=torch.exp(args.alpha*(1-sim_aug1))
-      scale_aug2=torch.exp(args.alpha*(1-sim_aug2))
+    #   features_clean_mean=features_clean#torch.mean(features_clean,dim=0).reshape(1,-1).repeat_interleave(n_img,dim=0)
+    #   sim_aug1=F.cosine_similarity(features_clean_mean,features_aug1,axis=-1).cuda()
+    #   sim_aug2=F.cosine_similarity(features_clean_mean,features_aug2,axis=-1).cuda()
+    #   scale_aug1=torch.exp(args.alpha*(1-sim_aug1))
+    #   scale_aug2=torch.exp(args.alpha*(1-sim_aug2))
 
     #   if not args.no_topk:
     #     # with topk
@@ -329,12 +329,12 @@ def train(net, train_loader, optimizer, scheduler):
     #     scale_aug1=scale_aug1*((~topk_aug1)*scale_epoch+topk_aug1)
     #     scale_aug2=scale_aug2*((~topk_aug2)*scale_epoch+topk_aug2)
 
-      kl_div_aug1=scale_aug1*F.kl_div(p_mixture, p_aug1, reduction='none').mean(axis=-1)
-      kl_div_aug2=scale_aug2*F.kl_div(p_mixture, p_aug2, reduction='none').mean(axis=-1)
-    else:
+    #   kl_div_aug1=scale_aug1*F.kl_div(p_mixture, p_aug1, reduction='none').mean(axis=-1)
+    #   kl_div_aug2=scale_aug2*F.kl_div(p_mixture, p_aug2, reduction='none').mean(axis=-1)
+    # else:
     #   # print('No scale')
-      kl_div_aug1=F.kl_div(p_mixture, p_aug1, reduction='none').mean(axis=-1)
-      kl_div_aug2=F.kl_div(p_mixture, p_aug2, reduction='none').mean(axis=-1)
+    kl_div_aug1=F.kl_div(p_mixture, p_aug1, reduction='none').mean(axis=-1)
+    kl_div_aug2=F.kl_div(p_mixture, p_aug2, reduction='none').mean(axis=-1)
 
     loss_jsd = 12 * (F.kl_div(p_mixture, p_clean, reduction='batchmean') +
                   torch.mean(kl_div_aug1) +

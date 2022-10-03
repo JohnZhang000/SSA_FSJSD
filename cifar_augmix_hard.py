@@ -140,7 +140,7 @@ CORRUPTIONS = [
     'contrast', 'elastic_transform', 'jpeg_compression', 'pixelate',
     'gaussian_noise', 'impulse_noise',  'shot_noise', 
     'brightness', 'fog', 'frost','snow',
-    # 'gaussian_blur', 'saturate', 'spatter', 'speckle_noise'
+    'gaussian_blur', 'saturate', 'spatter', 'speckle_noise'
 ]
 
 
@@ -168,10 +168,12 @@ def aug(image, preprocess):
   m = np.float32(np.random.beta(1, 1))
 
   mix = torch.zeros_like(preprocess(image))
+  depths=[]
   for i in range(args.mixture_width):
     image_aug = image.copy()
     depth = args.mixture_depth if args.mixture_depth > 0 else np.random.randint(
         1, 4)
+    depths.append(depth)
     for _ in range(depth):
       op = np.random.choice(aug_list)
       image_aug = op(image_aug, args.aug_severity)
@@ -179,7 +181,10 @@ def aug(image, preprocess):
     mix += ws[i] * preprocess(image_aug)
 
   mixed = (1 - m) * preprocess(image) + m * mix
-  return mixed
+
+  depths_mean=np.array(depths).mean()
+  scale=m*float(depths_mean)
+  return mixed,scale
 
 
 class AugMixDataset(torch.utils.data.Dataset):
@@ -193,11 +198,14 @@ class AugMixDataset(torch.utils.data.Dataset):
   def __getitem__(self, i):
     x, y = self.dataset[i]
     if self.no_jsd:
-      return aug(x, self.preprocess), y
+      auged,scale=aug(x, self.preprocess)
+      return auged, y, scale
     else:
-      im_tuple = (self.preprocess(x), aug(x, self.preprocess),
-                  aug(x, self.preprocess))
-      return im_tuple, y
+      auged1, scale1=aug(x, self.preprocess)
+      auged2, scale2=aug(x, self.preprocess)
+      im_tuple = (self.preprocess(x), auged1,
+                  auged2)
+      return im_tuple, y, (scale1,scale2)
 
   def __len__(self):
     return len(self.dataset)
@@ -207,7 +215,7 @@ def train(net, train_loader, optimizer, scheduler):
   """Train for one epoch."""
   net.train()
   loss_ema = 0.
-  for i, (images, targets) in enumerate(train_loader):
+  for i, (images, targets, scales) in enumerate(train_loader):
     optimizer.zero_grad()
 
     if args.no_jsd:
@@ -231,10 +239,13 @@ def train(net, train_loader, optimizer, scheduler):
                   logits_aug2, dim=1)
 
       # Clamp mixture distribution to avoid exploding KL divergence
+
       p_mixture = torch.clamp((p_clean + p_aug1 + p_aug2) / 3., 1e-7, 1).log()
+      kl_div_aug1=(torch.exp(1+scales[0].cuda()))*F.kl_div(p_mixture, p_aug1, reduction='none').mean(axis=-1)
+      kl_div_aug2=(torch.exp(1+scales[1].cuda()))*F.kl_div(p_mixture, p_aug2, reduction='none').mean(axis=-1)
       loss += 12 * (F.kl_div(p_mixture, p_clean, reduction='batchmean') +
-                    F.kl_div(p_mixture, p_aug1, reduction='batchmean') +
-                    F.kl_div(p_mixture, p_aug2, reduction='batchmean')) / 3.
+                    torch.mean(kl_div_aug1) +
+                    torch.mean(kl_div_aug2)) / 3.
 
     loss.backward()
     optimizer.step()
@@ -303,10 +314,10 @@ def main():
 
   if args.dataset == 'cifar10':
     train_data = datasets.CIFAR10(
-        '/home/zhangzhuang/Datasets/Cifar-10', train=True, transform=train_transform, download=True)
+        '/home/estar/Datasets/cifar-10', train=True, transform=train_transform, download=True)
     test_data = datasets.CIFAR10(
-        '/home/zhangzhuang/Datasets/Cifar-10', train=False, transform=test_transform, download=True)
-    base_c_path = '/home/zhangzhuang/Datasets/Cifar-10-C/'
+        '/home/estar/Datasets/cifar-10', train=False, transform=test_transform, download=True)
+    base_c_path = '/home/estar/Datasets/cifar-10-c/'
     num_classes = 10
   else:
     train_data = datasets.CIFAR100(

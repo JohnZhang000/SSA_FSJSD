@@ -46,9 +46,8 @@ def create_subset(src_folder,dst_folder,img_path_list,sysnet_list,topk=100):
 
     return
 
-
-src_folder = '/media/ubuntu204/F/Dataset/ImageNet-C-100'
-dst_folder = '/media/ubuntu204/F/Dataset/ILSVRC2012-10-C'
+src_folder = '/media/ubuntu204/F/Dataset/ILSVRC2012-C'
+dst_folder = '/media/ubuntu204/F/Dataset/ILSVRC2012-100-C'
 
 CORRUPTIONS = [
     'noise/gaussian_noise', 'noise/shot_noise', 'noise/impulse_noise', 
@@ -58,10 +57,32 @@ CORRUPTIONS = [
     'extra/gaussian_blur', 'extra/saturate', 'extra/spatter', 'extra/speckle_noise'
 ]
 
+# # 创建子数据集
+# for corruption in CORRUPTIONS:
+#     for i in range(5):
+#         print('%s_%d'%(corruption,i))
+#         src_folder_tmp=os.path.join(src_folder,corruption,str(i+1))
+#         dst_folder_tmp=os.path.join(dst_folder,corruption,str(i+1))
+#         img_path_list,sysnet_list=get_imgnames(src_folder_tmp)
+#         create_subset(src_folder_tmp,dst_folder_tmp,img_path_list,sysnet_list,10)
+
+# 拷贝与删除sysnet
+del_sysnet=['n01855672']
+add_sysnet=['n04146614']
 for corruption in CORRUPTIONS:
     for i in range(5):
         print('%s_%d'%(corruption,i))
         src_folder_tmp=os.path.join(src_folder,corruption,str(i+1))
         dst_folder_tmp=os.path.join(dst_folder,corruption,str(i+1))
-        img_path_list,sysnet_list=get_imgnames(src_folder_tmp)
-        create_subset(src_folder_tmp,dst_folder_tmp,img_path_list,sysnet_list,10)
+        img_path_list,sysnet_list=get_imgnames(dst_folder_tmp)
+        for sysnet in del_sysnet:
+            if sysnet in sysnet_list: 
+                shutil.rmtree(os.path.join(dst_folder_tmp,sysnet))
+                print('Remove:{}'.format(os.path.join(dst_folder_tmp,sysnet)))
+
+        for sysnet in add_sysnet:
+            if sysnet in sysnet_list: shutil.rmtree(os.path.join(dst_folder_tmp,sysnet))
+            shutil.copytree(os.path.join(src_folder_tmp,sysnet),os.path.join(dst_folder_tmp,sysnet))
+            print('Add:{}'.format(os.path.join(dst_folder_tmp,sysnet)))
+
+        # print(sysnet_list)

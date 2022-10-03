@@ -133,7 +133,8 @@ parser.add_argument(
     '--resume',
     '-r',
     type=str,
-    default='./snapshots_std/checkpoint.pth.tar',
+    default='./snapshots_vanilla/checkpoint.pth.tar',
+    # default='./snapshots_std/checkpoint.pth.tar',
     # default='./results/2022-08-19-09_57_53/checkpoint.pth.tar',
     help='Checkpoint path for resume / test.')
 parser.add_argument('--evaluate', action='store_true', help='Eval only.')
@@ -493,22 +494,23 @@ def test_pair(net, test_loader):
   np.save(os.path.join(saved_dir,'hypers.npy'),hypers)
   return correct_cln/len(test_loader.dataset), correct_aug/len(test_loader.dataset)
 
-def get_fourier_base(images,signs,position):
+def get_fourier_base(images,signs,position,spectrum_mean):
   noise=np.zeros_like(images)
-  noise[:,:,position[1],position[2]]=1
+  # noise=np.expand_dims(noise,axis=1)
+  noise[:,position[0],position[1],position[2]]=spectrum_mean[position[0],position[1],position[2]]
   noise=dct2img(noise,signs)
 
   norm=np.linalg.norm(noise,ord=2,axis=(-1,-2),keepdims=False)
   norm=np.expand_dims(norm,(2,3))
-  noise=noise/norm
-  noise=noise*4
+  noise[:,position[0],...]=noise[:,position[0],...]/norm[:,position[0],...]
+  noise=noise*2
   return noise
 
-def add_noise(images,position):
+def add_noise(images,position,spectrum_mean):
   images=images*0.5+0.5
   images_ycbcr=g.rgb_to_ycbcr(images)
   images_dct,signs=img2dct(images_ycbcr)
-  noise_ycbcr=get_fourier_base(images_dct,signs,position)
+  noise_ycbcr=get_fourier_base(images_dct,signs,position,spectrum_mean)
 
   adds=np.random.randn(images.shape[0],images.shape[1])
   adds[adds<0.5]=-1
@@ -522,7 +524,26 @@ def add_noise(images,position):
   images_ret=images_ret.astype(np.float32)
   return images_ret
 
-def test_single(net, test_data,position):
+def get_mean_spectrum(test_data):
+    test_loader = torch.utils.data.DataLoader(
+    test_data,
+    batch_size=args.eval_batch_size,
+    shuffle=False,
+    drop_last=False,
+    num_workers=args.num_workers,
+    pin_memory=True)
+    images_dcts=[]
+    for images, targets in test_loader:
+      images=images*0.5+0.5
+      images_ycbcr=g.rgb_to_ycbcr(images.numpy())
+      images_dct,signs=img2dct(images_ycbcr)
+      images_dcts.append(images_dct)
+    images_dcts=np.vstack(images_dcts)
+    image_mean=images_dcts.mean(axis=0)
+    return image_mean
+
+
+def test_single(net, test_data,position,spectrum_mean):
   """Evaluate network on given dataset."""
 
   test_loader = torch.utils.data.DataLoader(
@@ -531,13 +552,14 @@ def test_single(net, test_data,position):
     shuffle=False,
     drop_last=False,
     num_workers=args.num_workers,
-    pin_memory=False)
+    pin_memory=True)
 
   net.eval()
   correct=0
   with torch.no_grad():
     for images, targets in test_loader:
-      images_noise = add_noise(images.numpy(),position)
+      images_noise = add_noise(images.numpy(),position,spectrum_mean)
+      # images_noise=images.numpy()
       images_noise = torch.from_numpy(images_noise)
       a=images_noise-images
       # print('Diff:{}'.format(a.mean()))
@@ -551,13 +573,14 @@ def test_single(net, test_data,position):
   return 1-correct/len(test_loader.dataset)/100.0
 
 def test_heatmap(net,test_data,map_size):
+  spectrum_mean=get_mean_spectrum(test_data)
   heatmap=np.ones(map_size)
 
   with tqdm(total=np.array(map_size).prod()) as pbar:
     for i in range(map_size[0]):
       for j in range(map_size[1]):
         for k in range(map_size[2]):
-          err=test_single(net,test_data,[i,j,k])
+          err=test_single(net,test_data,[i,j,k],spectrum_mean)
           heatmap[i,j,k]=err
           pbar.set_description('{}/{}_{}/{}_{}/{}: {}'.format(i+1,map_size[0],j+1,map_size[1],k+1,map_size[2],err))
           pbar.update(1)
@@ -608,6 +631,7 @@ def accuracy(output, target, topk=(1,)):
 
 
 def main():
+  os.environ['CUDA_VISIBLE_DEVICES']= '0'
   # torch.manual_seed(1)
   # np.random.seed(1)
 
@@ -697,7 +721,7 @@ def main():
   logger.info('Model restored from {}'.format(args.resume))
 
   # acc_cln,acc_aug=test_pair(net, test_loader)
-  map=test_heatmap(net, test_data,[1,32,32])
+  map=test_heatmap(net, test_data,[3,32,32])
   my_mat={}
   for i in range(map.shape[0]):
     my_mat[str(i)]=map[i,...]

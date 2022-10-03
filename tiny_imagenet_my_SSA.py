@@ -39,7 +39,7 @@ import logging
 import general as g
 import socket
 from torch.utils.tensorboard import SummaryWriter
-augmentations.IMAGE_SIZE = 224
+augmentations.IMAGE_SIZE = 64
 
 now = time.strftime("%Y-%m-%d-%H_%M_%S",time.localtime(time.time())) 
 saved_dir=os.path.join('./results',now)
@@ -54,8 +54,6 @@ parser.add_argument(
     '--clean_data', default='', metavar='DIR', help='path to clean ImageNet dataset')
 parser.add_argument(
     '--corrupted_data', default='', metavar='DIR_C', help='path to ImageNet-C dataset')
-parser.add_argument(
-    '--num_classes', '-ncs', type=int, default=10, help='Number of classes to train.')
 parser.add_argument(
     '--model',
     '-m',
@@ -85,14 +83,19 @@ parser.add_argument(
 # AugMix options
 parser.add_argument(
     '--mixture-width',
-    default=3,
+    default=1,
     type=int,
     help='Number of augmentation chains to mix per augmented example')
 parser.add_argument(
     '--mixture-depth',
-    default=-1,
+    default=8,
     type=int,
     help='Depth of augmentation chains. -1 denotes stochastic depth in [1, 3]')
+parser.add_argument(
+    '--aug-std',
+    '-as',
+    action='store_true',
+    help='Turn off my augment.')
 parser.add_argument(
     '--aug-severity',
     default=1,
@@ -151,49 +154,61 @@ parser.add_argument(
 parser.add_argument(
     '--contrast_scale',
     type=float,
-    default=1.0,
+    default=2.0,
     help='r thresh for impulse noise')
 parser.add_argument(
-    '--topk',
+    '--noise_scale',
     type=float,
     default=0.5,
     help='r thresh for impulse noise')
+# parser.add_argument(
+#     '--topk',
+#     type=float,
+#     default=0.5,
+#     help='r thresh for impulse noise')
+# parser.add_argument(
+#     '--topk_epoch',
+#     type=float,
+#     default=0.6,
+#     help='r thresh for impulse noise')
+# parser.add_argument(
+#     '--no_fsim',
+#     '-nfs',
+#     action='store_true',
+#     help='Turn off feature similiarity loss.')
+# parser.add_argument(
+#     '--no_topk',
+#     '-ntk',
+#     action='store_true',
+#     help='Turn off topk loss.')
+# parser.add_argument(
+#     '--no_timei',
+#     '-nti',
+#     action='store_true',
+#     help='Turn off time invariant loss.')
+# parser.add_argument(
+#     '--alpha',
+#     type=float,
+#     default=3.0,
+#     help='r thresh for impulse noise')
 parser.add_argument(
-    '--topk_epoch',
-    type=float,
-    default=0.6,
-    help='r thresh for impulse noise')
-parser.add_argument(
-    '--no_fsim',
-    '-nfs',
-    action='store_true',
-    help='Turn off feature similiarity loss.')
-parser.add_argument(
-    '--no_topk',
-    '-ntk',
-    action='store_true',
-    help='Turn off topk loss.')
-parser.add_argument(
-    '--no_timei',
-    '-nti',
-    action='store_true',
-    help='Turn off time invariant loss.')
-parser.add_argument(
-    '--alpha',
-    type=float,
-    default=3.0,
-    help='r thresh for impulse noise')
+    '--seed',
+    type=int,
+    default=1,
+    help='random seed')
 
 args = parser.parse_args()
 augmentations.IMPULSE_THRESH = args.imp_thresh
 augmentations.CONTRAST_SCALE = args.contrast_scale
-TOPK=args.topk
-TOPk_EPOCH=int(args.topk_epoch*args.epochs)
+augmentations.NOISE_SCALE = args.noise_scale
+# TOPK=args.topk
+# TOPk_EPOCH=int(args.topk_epoch*args.epochs)
+
 CORRUPTIONS = [
+    'noise/gaussian_noise', 'noise/shot_noise', 'noise/impulse_noise', 
     'blur/defocus_blur', 'blur/glass_blur', 'blur/motion_blur', 'blur/zoom_blur', 
-    'digital/contrast', 'digital/elastic_transform', 'digital/jpeg_compression', 'digital/pixelate',
-    'noise/gaussian_noise', 'noise/impulse_noise', 'noise/shot_noise',  
-    'weather/brightness', 'weather/fog', 'weather/frost', 'weather/snow', 
+    'weather/snow', 'weather/frost', 'weather/fog', 'weather/brightness', 
+    'digital/contrast', 'digital/elastic_transform', 'digital/pixelate', 'digital/jpeg_compression',
     'extra/gaussian_blur', 'extra/saturate', 'extra/spatter', 'extra/speckle_noise'
 ]
 
@@ -257,7 +272,10 @@ def aug(image, preprocess):
   Returns:
     mixed: Augmented and mixed image.
   """
-  aug_list = augmentations.augmentations
+  if args.aug_std:
+    aug_list = augmentations.augmentations_std
+  else:
+    aug_list = augmentations.augmentations
   if args.all_ops:
     aug_list = augmentations.augmentations_all
 
@@ -268,8 +286,7 @@ def aug(image, preprocess):
   mix = torch.zeros_like(preprocess(image))
   for i in range(args.mixture_width):
     image_aug = image.copy()
-    depth = args.mixture_depth if args.mixture_depth > 0 else np.random.randint(
-        1, 10)
+    depth = np.random.randint(1, args.mixture_depth)
     for _ in range(depth):
       op = np.random.choice(aug_list)
       image_aug = op(image_aug, args.aug_severity)
@@ -300,13 +317,13 @@ class AugMixDataset(torch.utils.data.Dataset):
   def __len__(self):
     return len(self.dataset)
 
-def select_topk(p_y,y):
-    target_onehot=torch.zeros_like(p_y).scatter_(1, y.reshape(-1,1), 1)
-    target_logits=torch.sum(p_y*target_onehot,axis=1)
-    n_correct=torch.sum((target_logits>0.5))
-    topk_aug1=target_logits.topk(int(TOPK*(len(y)-n_correct)+n_correct),dim=0)[0][-1]
-    topk=target_logits>topk_aug1
-    return topk
+# def select_topk(p_y,y):
+#     target_onehot=torch.zeros_like(p_y).scatter_(1, y.reshape(-1,1), 1)
+#     target_logits=torch.sum(p_y*target_onehot,axis=1)
+#     n_correct=torch.sum((target_logits>0.5))
+#     topk_aug1=target_logits.topk(int(TOPK*(len(y)-n_correct)+n_correct),dim=0)[0][-1]
+#     topk=target_logits>topk_aug1
+#     return topk
 
 def train(net, train_loader, optimizer,scheduler):
   """Train for one epoch."""
@@ -341,34 +358,34 @@ def train(net, train_loader, optimizer,scheduler):
     p_mixture = torch.clamp((p_clean + p_aug1 + p_aug2) / 3., 1e-7, 1).log()
 
     # with feature similarity
-    if not args.no_fsim:
-      features_clean=features_clean.reshape(n_img,-1)
-      features_aug1=features_aug1.reshape(n_img,-1)
-      features_aug2=features_aug2.reshape(n_img,-1)
+    # if not args.no_fsim:
+    #   features_clean=features_clean.reshape(n_img,-1)
+    #   features_aug1=features_aug1.reshape(n_img,-1)
+    #   features_aug2=features_aug2.reshape(n_img,-1)
 
-      features_clean_mean=features_clean#torch.mean(features_clean,dim=0).reshape(1,-1).repeat_interleave(n_img,dim=0)
-      sim_aug1=F.cosine_similarity(features_clean_mean,features_aug1,axis=-1).cuda()
-      sim_aug2=F.cosine_similarity(features_clean_mean,features_aug2,axis=-1).cuda()
-      scale_aug1=torch.exp(args.alpha*(1-sim_aug1))
-      scale_aug2=torch.exp(args.alpha*(1-sim_aug2))
+    #   features_clean_mean=features_clean#torch.mean(features_clean,dim=0).reshape(1,-1).repeat_interleave(n_img,dim=0)
+    #   sim_aug1=F.cosine_similarity(features_clean_mean,features_aug1,axis=-1).cuda()
+    #   sim_aug2=F.cosine_similarity(features_clean_mean,features_aug2,axis=-1).cuda()
+    #   scale_aug1=torch.exp(args.alpha*(1-sim_aug1))
+    #   scale_aug2=torch.exp(args.alpha*(1-sim_aug2))
 
-      # if not args.no_topk:
-      #   # with topk
-      #   topk_aug1=select_topk(p_aug1,targets)
-      #   topk_aug2=select_topk(p_aug2,targets)
-      #   if not args.no_timei:
-      #     # with time invariant
-      #     scale_epoch=np.exp(min(0,TOPk_EPOCH-epoch))
-      #   else:
+    #   if not args.no_topk:
+    #     # with topk
+    #     topk_aug1=select_topk(p_aug1,targets)
+    #     topk_aug2=select_topk(p_aug2,targets)
       #     scale_epoch=1
-      #   scale_aug1=scale_aug1*((~topk_aug1)*scale_epoch+topk_aug1)
-      #   scale_aug2=scale_aug2*((~topk_aug2)*scale_epoch+topk_aug2)
+    #     if not args.no_timei:
+    # #       # with time invariant
+    #       scale_epoch=np.exp(min(0,TOPk_EPOCH-epoch))          
+    #     scale_aug1=scale_aug1*((~topk_aug1)*scale_epoch+topk_aug1)
+    #     scale_aug2=scale_aug2*((~topk_aug2)*scale_epoch+topk_aug2)
 
-      kl_div_aug1=scale_aug1*F.kl_div(p_mixture, p_aug1, reduction='none').mean(axis=-1)
-      kl_div_aug2=scale_aug2*F.kl_div(p_mixture, p_aug2, reduction='none').mean(axis=-1)
-    else:
-      kl_div_aug1=F.kl_div(p_mixture, p_aug1, reduction='none').mean(axis=-1)
-      kl_div_aug2=F.kl_div(p_mixture, p_aug2, reduction='none').mean(axis=-1)
+    #   kl_div_aug1=scale_aug1*F.kl_div(p_mixture, p_aug1, reduction='none').mean(axis=-1)
+    #   kl_div_aug2=scale_aug2*F.kl_div(p_mixture, p_aug2, reduction='none').mean(axis=-1)
+    # else:
+    #   # print('No scale')
+    kl_div_aug1=F.kl_div(p_mixture, p_aug1, reduction='none').mean(axis=-1)
+    kl_div_aug2=F.kl_div(p_mixture, p_aug2, reduction='none').mean(axis=-1)
 
     loss_jsd = 12 * (F.kl_div(p_mixture, p_clean, reduction='batchmean') +
                   torch.mean(kl_div_aug1) +
@@ -482,33 +499,32 @@ def test_c(net, test_transform):
 
 
 def main():
-  torch.manual_seed(1)
-  np.random.seed(1)
+  # torch.manual_seed(1)
+  # np.random.seed(1)
 
   # Load datasets
   mean = [0.485, 0.456, 0.406]
   std = [0.229, 0.224, 0.225]
   train_transform = transforms.Compose(
-      [transforms.RandomResizedCrop(224),
+      [transforms.RandomResizedCrop(64),
        transforms.RandomHorizontalFlip()])
   preprocess = transforms.Compose(
       [transforms.ToTensor(),
        transforms.Normalize(mean, std)])
   test_transform = transforms.Compose([
-      transforms.Resize(256),
-      transforms.CenterCrop(224),
+      transforms.Resize(74),
+      transforms.CenterCrop(64),
       preprocess,
   ])
 
   device=socket.gethostname()
-  if 'estar-403'==device: root_dataset_dir='/home/estar/Datasets/'
-  elif 'Jet'==device: root_dataset_dir='/mnt/sdb/zhangzhuang/Datasets/'
-  elif '1080x4-1'==device: root_dataset_dir='/home/zhangzhuang/Datasets/'
-  elif 'ubuntu204'==device: root_dataset_dir='/media/ubuntu204/F/Dataset/'
+  if 'estar-403'==device: root_dataset_dir='/home/estar/Datasets/tiny-imagenet-200'
+  elif 'Jet'==device: root_dataset_dir='/mnt/sdb/zhangzhuang/Datasets/tiny-imagenet-200'
+  elif '1080x4-1'==device: root_dataset_dir='/home/zhangzhuang/Datasets/tiny-imagenet-200'
+  elif 'ubuntu204'==device: root_dataset_dir='/media/ubuntu204/F/Dataset/tiny-imagenet-200'
   else: raise Exception('Wrong device')
-  root_dataset_dir=root_dataset_dir+'ILSVRC2012-'+str(args.num_classes)
   args.clean_data=root_dataset_dir
-  args.corrupted_data=root_dataset_dir+'-C'
+  args.corrupted_data=root_dataset_dir+'-c'
 
   traindir = os.path.join(args.clean_data, 'train')
   valdir = os.path.join(args.clean_data, 'val')
@@ -518,8 +534,7 @@ def main():
       train_dataset,
       batch_size=args.batch_size,
       shuffle=True,
-      num_workers=args.num_workers,
-      pin_memory=True)
+      num_workers=args.num_workers)
   val_loader = torch.utils.data.DataLoader(
       datasets.ImageFolder(valdir, test_transform),
       batch_size=args.batch_size,
@@ -531,7 +546,7 @@ def main():
     net = models.__dict__[args.model](pretrained=True)
   else:
     logger.info("=> creating model '{}'".format(args.model))
-    net = models.__dict__[args.model]()
+    net = models.__dict__[args.model](num_classes=200)
 
   optimizer = torch.optim.SGD(
       net.parameters(),
@@ -557,7 +572,7 @@ def main():
       best_acc1 = checkpoint['best_acc1']
       net.load_state_dict(checkpoint['state_dict'])
       optimizer.load_state_dict(checkpoint['optimizer'])
-      logger.info('Model restored from epoch:{}'.format(start_epoch))
+      logger.info('Model restored from epoch:', start_epoch)
 
   if args.evaluate:
     test_loss, test_acc1 = test(net, val_loader)

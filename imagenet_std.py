@@ -56,6 +56,8 @@ parser.add_argument(
 parser.add_argument(
     '--corrupted_data', default='', metavar='DIR_C', help='path to ImageNet-C dataset')
 parser.add_argument(
+    '--num_classes', '-ncs', type=int, default=10, help='Number of classes to train.')
+parser.add_argument(
     '--model',
     '-m',
     default='resnet50',
@@ -415,13 +417,14 @@ def main():
   ])
 
   device=socket.gethostname()
-  if 'estar-403'==device: root_dataset_dir='/home/estar/Datasets/ILSVRC2012-10'
-  elif 'Jet'==device: root_dataset_dir='/mnt/sdb/zhangzhuang/Datasets/ILSVRC2012-10'
-  elif '1080x4-1'==device: root_dataset_dir='/home/zhangzhuang/Datasets/ILSVRC2012-10'
-  elif 'ubuntu204'==device: root_dataset_dir='/media/ubuntu204/F/Dataset/ILSVRC2012-10'
+  if 'estar-403'==device: root_dataset_dir='/home/estar/Datasets/'
+  elif 'Jet'==device: root_dataset_dir='/mnt/sdb/zhangzhuang/Datasets/'
+  elif '1080x4-1'==device: root_dataset_dir='/home/zhangzhuang/Datasets/'
+  elif 'ubuntu204'==device: root_dataset_dir='/media/ubuntu204/F/Dataset/'
   else: raise Exception('Wrong device')
+  root_dataset_dir=root_dataset_dir+'ILSVRC2012-'+str(args.num_classes)
   args.clean_data=root_dataset_dir
-  args.corrupted_data=root_dataset_dir+'-c'
+  args.corrupted_data=root_dataset_dir+'-C'
 
   traindir = os.path.join(args.clean_data, 'train')
   valdir = os.path.join(args.clean_data, 'val')

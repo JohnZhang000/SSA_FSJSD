@@ -12,12 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
-"""Main script to launch AugMix training on ImageNet.
+"""Main script to launch AugMix training on CIFAR-10/100.
 
-Currently only supports ResNet-50 training.
+Supports WideResNet, AllConv, ResNeXt models on CIFAR-10 and CIFAR-100 as well
+as evaluation on CIFAR-10-C and CIFAR-100-C.
 
 Example usage:
-  `python imagenet.py <path/to/ImageNet> <path/to/ImageNet-C>`
+  `python cifar.py`
 """
 from __future__ import print_function
 
@@ -27,45 +28,47 @@ import shutil
 import time
 
 import augmentations
-
+from models.allconv import AllConvNet
 import numpy as np
+from models.third_party.ResNeXt_DenseNet.models.densenet import densenet
+from models.third_party.ResNeXt_DenseNet.models.resnext import resnext29
+from models.third_party.WideResNet_pytorch.wideresnet import WideResNet
+
 import torch
 import torch.backends.cudnn as cudnn
+import torch.nn as nn
 import torch.nn.functional as F
 from torchvision import datasets
-from torchvision import models
 from torchvision import transforms
 import logging
 import general as g
 import socket
 from torch.utils.tensorboard import SummaryWriter
-augmentations.IMAGE_SIZE = 224
 
 now = time.strftime("%Y-%m-%d-%H_%M_%S",time.localtime(time.time())) 
 saved_dir=os.path.join('./results',now)
 if not os.path.exists(saved_dir):
     os.makedirs(saved_dir)
-model_names = sorted(name for name in models.__dict__
-                     if name.islower() and not name.startswith('__') and
-                     callable(models.__dict__[name]))
 
-parser = argparse.ArgumentParser(description='Trains an ImageNet Classifier')
+parser = argparse.ArgumentParser(
+    description='Trains a CIFAR Classifier',
+    formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument(
-    '--clean_data', default='', metavar='DIR', help='path to clean ImageNet dataset')
-parser.add_argument(
-    '--corrupted_data', default='', metavar='DIR_C', help='path to ImageNet-C dataset')
-parser.add_argument(
-    '--num_classes', '-ncs', type=int, default=10, help='Number of classes to train.')
+    '--dataset',
+    type=str,
+    default='cifar10',
+    choices=['cifar10', 'cifar100'],
+    help='Choose between CIFAR-10, CIFAR-100.')
 parser.add_argument(
     '--model',
     '-m',
-    default='resnet50',
-    choices=model_names,
-    help='model architecture: ' + ' | '.join(model_names) +
-    ' (default: resnet50)')
+    type=str,
+    default='allconv',
+    choices=['wrn', 'allconv', 'densenet', 'resnext'],
+    help='Choose architecture.')
 # Optimization options
 parser.add_argument(
-    '--epochs', '-e', type=int, default=90, help='Number of epochs to train.')
+    '--epochs', '-e', type=int, default=100, help='Number of epochs to train.')
 parser.add_argument(
     '--learning-rate',
     '-lr',
@@ -73,36 +76,42 @@ parser.add_argument(
     default=0.1,
     help='Initial learning rate.')
 parser.add_argument(
-    '--batch-size', '-b', type=int, default=256, help='Batch size.')
+    '--batch-size', '-b', type=int, default=128, help='Batch size.')
 parser.add_argument('--eval-batch-size', type=int, default=1000)
 parser.add_argument('--momentum', type=float, default=0.9, help='Momentum.')
 parser.add_argument(
     '--decay',
     '-wd',
     type=float,
-    default=0.0001,
+    default=0.0005,
     help='Weight decay (L2 penalty).')
+# WRN Architecture options
+parser.add_argument(
+    '--layers', default=40, type=int, help='total number of layers')
+parser.add_argument('--widen-factor', default=2, type=int, help='Widen factor')
+parser.add_argument(
+    '--droprate', default=0.0, type=float, help='Dropout probability')
 # AugMix options
 parser.add_argument(
     '--mixture-width',
-    default=3,
+    default=1,
     type=int,
     help='Number of augmentation chains to mix per augmented example')
 parser.add_argument(
     '--mixture-depth',
-    default=-1,
+    default=10,
     type=int,
     help='Depth of augmentation chains. -1 denotes stochastic depth in [1, 3]')
 parser.add_argument(
+    '--aug-std',
+    '-as',
+    action='store_true',
+    help='Turn off my augment.')
+parser.add_argument(
     '--aug-severity',
-    default=1,
+    default=3,
     type=int,
     help='Severity of base augmentation operators')
-parser.add_argument(
-    '--aug-prob-coeff',
-    default=1.,
-    type=float,
-    help='Probability distribution coefficients')
 parser.add_argument(
     '--no-jsd',
     '-nj',
@@ -132,11 +141,6 @@ parser.add_argument(
     type=int,
     default=50,
     help='Training loss print frequency (batches).')
-parser.add_argument(
-    '--pretrained',
-    dest='pretrained',
-    action='store_true',
-    help='use pre-trained model')
 # Acceleration
 parser.add_argument(
     '--num-workers',
@@ -152,6 +156,11 @@ parser.add_argument(
     '--contrast_scale',
     type=float,
     default=1.0,
+    help='r thresh for impulse noise')
+parser.add_argument(
+    '--noise_scale',
+    type=float,
+    default=0.5,
     help='r thresh for impulse noise')
 parser.add_argument(
     '--topk',
@@ -183,68 +192,32 @@ parser.add_argument(
     type=float,
     default=3.0,
     help='r thresh for impulse noise')
+parser.add_argument(
+    '--seed',
+    type=int,
+    default=1,
+    help='random seed')
 
 args = parser.parse_args()
 augmentations.IMPULSE_THRESH = args.imp_thresh
 augmentations.CONTRAST_SCALE = args.contrast_scale
+augmentations.NOISE_SCALE = args.noise_scale
 TOPK=args.topk
 TOPk_EPOCH=int(args.topk_epoch*args.epochs)
+
 CORRUPTIONS = [
-    'blur/defocus_blur', 'blur/glass_blur', 'blur/motion_blur', 'blur/zoom_blur', 
-    'digital/contrast', 'digital/elastic_transform', 'digital/jpeg_compression', 'digital/pixelate',
-    'noise/gaussian_noise', 'noise/impulse_noise', 'noise/shot_noise',  
-    'weather/brightness', 'weather/fog', 'weather/frost', 'weather/snow', 
-    'extra/gaussian_blur', 'extra/saturate', 'extra/spatter', 'extra/speckle_noise'
-]
-
-# Raw AlexNet errors taken from https://github.com/hendrycks/robustness
-ALEXNET_ERR = [
-    0.886428, 0.894468, 0.922640, 0.819880, 0.826268, 0.785948, 0.798360,
-    0.866816, 0.826572, 0.819324, 0.564592, 0.853204, 0.646056, 0.717840,
-    0.606500
+    'defocus_blur', 'glass_blur', 'motion_blur', 'zoom_blur',
+    'contrast', 'elastic_transform', 'jpeg_compression', 'pixelate',
+    'gaussian_noise', 'impulse_noise',  'shot_noise', 
+    'brightness', 'fog', 'frost','snow',
+    'gaussian_blur', 'saturate', 'spatter', 'speckle_noise'
 ]
 
 
-def adjust_learning_rate(optimizer, epoch):
-  """Sets the learning rate to the initial LR (linearly scaled to batch size) decayed by 10 every n / 3 epochs."""
-  b = args.batch_size / 256.
-  k = args.epochs // 3
-  if epoch < k:
-    m = 1
-  elif epoch < 2 * k:
-    m = 0.1
-  else:
-    m = 0.01
-  lr = args.learning_rate * m * b
-  for param_group in optimizer.param_groups:
-    param_group['lr'] = lr
-
-
-def accuracy(output, target, topk=(1,)):
-  """Computes the accuracy over the k top predictions for the specified values of k."""
-  with torch.no_grad():
-    maxk = max(topk)
-    batch_size = target.size(0)
-
-    _, pred = output.topk(maxk, 1, True, True)
-    pred = pred.t()
-    correct = pred.eq(target.view(1, -1).expand_as(pred))
-
-    res = []
-    for k in topk:
-      correct_k = correct[:k].reshape(-1).float().sum(0, keepdim=True)
-      res.append(correct_k.mul_(100.0 / batch_size))
-    return res
-
-
-def compute_mce(corruption_accs):
-  """Compute mCE (mean Corruption Error) normalized by AlexNet performance."""
-  mce = 0.
-  for i in range(len(CORRUPTIONS)):
-    avg_err = 1 - np.mean(corruption_accs[CORRUPTIONS[i]])
-    ce = 100 * avg_err / ALEXNET_ERR[i]
-    mce += ce / 15
-  return mce
+def get_lr(step, total_steps, lr_max, lr_min):
+  """Compute learning rate according to cosine annealing schedule."""
+  return lr_min + (lr_max - lr_min) * 0.5 * (1 +
+                                             np.cos(step / total_steps * np.pi))
 
 
 def aug(image, preprocess):
@@ -257,19 +230,22 @@ def aug(image, preprocess):
   Returns:
     mixed: Augmented and mixed image.
   """
-  aug_list = augmentations.augmentations
+  if args.aug_std:
+    aug_list = augmentations.augmentations_std
+  else:
+    aug_list = augmentations.augmentations
   if args.all_ops:
     aug_list = augmentations.augmentations_all
 
-  ws = np.float32(
-      np.random.dirichlet([args.aug_prob_coeff] * args.mixture_width))
-  m = np.float32(np.random.beta(args.aug_prob_coeff, args.aug_prob_coeff))
+  ws = np.float32(np.random.dirichlet([1] * args.mixture_width))
+  m = np.float32(np.random.beta(1, 1))
 
   mix = torch.zeros_like(preprocess(image))
+  depths=[]
   for i in range(args.mixture_width):
     image_aug = image.copy()
-    depth = args.mixture_depth if args.mixture_depth > 0 else np.random.randint(
-        1, 10)
+    depth = np.random.randint(1, args.mixture_depth)
+    depths.append(float(depth))
     for _ in range(depth):
       op = np.random.choice(aug_list)
       image_aug = op(image_aug, args.aug_severity)
@@ -277,7 +253,9 @@ def aug(image, preprocess):
     mix += ws[i] * preprocess(image_aug)
 
   mixed = (1 - m) * preprocess(image) + m * mix
-  return mixed
+  depth_mean=float(np.array(depths).mean())/10
+  scale=(m+depth_mean)/2
+  return mixed,scale
 
 
 class AugMixDataset(torch.utils.data.Dataset):
@@ -293,9 +271,11 @@ class AugMixDataset(torch.utils.data.Dataset):
     if self.no_jsd:
       return aug(x, self.preprocess), y
     else:
-      im_tuple = (self.preprocess(x), aug(x, self.preprocess),
-                  aug(x, self.preprocess))
-      return im_tuple, y
+      aug1,depth1=aug(x, self.preprocess)
+      aug2,depth2=aug(x, self.preprocess)
+      im_tuple = (self.preprocess(x), aug1,
+                  aug2)
+      return im_tuple, y, (depth1,depth2)
 
   def __len__(self):
     return len(self.dataset)
@@ -308,19 +288,11 @@ def select_topk(p_y,y):
     topk=target_logits>topk_aug1
     return topk
 
-def train(net, train_loader, optimizer,scheduler):
+def train(net, train_loader, optimizer, scheduler):
   """Train for one epoch."""
   net.train()
-  data_ema = 0.
-  batch_ema = 0.
   loss_ema = 0.
-  acc1_ema = 0.
-  acc5_ema = 0.
-
-  end = time.time()
-  for i, (images, targets) in enumerate(train_loader):
-    # Compute data loading time
-    data_time = time.time() - end
+  for i, (images, targets, depths) in enumerate(train_loader):
     optimizer.zero_grad()
 
     logits_clean,features_clean=get_preds_and_features(net,images[0].cuda(),args.model)
@@ -340,35 +312,32 @@ def train(net, train_loader, optimizer,scheduler):
                 logits_aug2, dim=1)
     p_mixture = torch.clamp((p_clean + p_aug1 + p_aug2) / 3., 1e-7, 1).log()
 
-    # with feature similarity
-    if not args.no_fsim:
-      features_clean=features_clean.reshape(n_img,-1)
-      features_aug1=features_aug1.reshape(n_img,-1)
-      features_aug2=features_aug2.reshape(n_img,-1)
+    features_clean=features_clean.reshape(n_img,-1)
+    features_aug1=features_aug1.reshape(n_img,-1)
+    features_aug2=features_aug2.reshape(n_img,-1)
 
-      features_clean_mean=features_clean#torch.mean(features_clean,dim=0).reshape(1,-1).repeat_interleave(n_img,dim=0)
-      sim_aug1=F.cosine_similarity(features_clean_mean,features_aug1,axis=-1).cuda()
-      sim_aug2=F.cosine_similarity(features_clean_mean,features_aug2,axis=-1).cuda()
-      scale_aug1=torch.exp(args.alpha*(1-sim_aug1))
-      scale_aug2=torch.exp(args.alpha*(1-sim_aug2))
+    features_clean_mean=features_clean#torch.mean(features_clean,dim=0).reshape(1,-1).repeat_interleave(n_img,dim=0)
+    sim_aug1=F.cosine_similarity(features_clean_mean,features_aug1,axis=-1).cuda()
+    sim_aug2=F.cosine_similarity(features_clean_mean,features_aug2,axis=-1).cuda()
+    scale_aug1_1=torch.exp(args.alpha*(1-sim_aug1))
+    scale_aug2_1=torch.exp(args.alpha*(1-sim_aug2))
 
-      # if not args.no_topk:
-      #   # with topk
-      #   topk_aug1=select_topk(p_aug1,targets)
-      #   topk_aug2=select_topk(p_aug2,targets)
-      #   if not args.no_timei:
-      #     # with time invariant
-      #     scale_epoch=np.exp(min(0,TOPk_EPOCH-epoch))
-      #   else:
-      #     scale_epoch=1
-      #   scale_aug1=scale_aug1*((~topk_aug1)*scale_epoch+topk_aug1)
-      #   scale_aug2=scale_aug2*((~topk_aug2)*scale_epoch+topk_aug2)
+    # kl_div_aug1=scale_aug1*F.kl_div(p_mixture, p_aug1, reduction='none').mean(axis=-1)
+    # kl_div_aug2=scale_aug2*F.kl_div(p_mixture, p_aug2, reduction='none').mean(axis=-1)
 
-      kl_div_aug1=scale_aug1*F.kl_div(p_mixture, p_aug1, reduction='none').mean(axis=-1)
-      kl_div_aug2=scale_aug2*F.kl_div(p_mixture, p_aug2, reduction='none').mean(axis=-1)
-    else:
-      kl_div_aug1=F.kl_div(p_mixture, p_aug1, reduction='none').mean(axis=-1)
-      kl_div_aug2=F.kl_div(p_mixture, p_aug2, reduction='none').mean(axis=-1)
+    kl_div_aug1=F.kl_div(p_mixture, p_aug1, reduction='none').mean(axis=-1)
+    kl_div_aug2=F.kl_div(p_mixture, p_aug2, reduction='none').mean(axis=-1)
+
+    scale_aug1_2=((1+depths[0].cuda())**1)
+    scale_aug2_2=((1+depths[1].cuda())**1)
+    scale_1=torch.min(0,scale_aug1_2-0.5)#(scale_aug1_1+scale_aug1_2)/2
+    scale_2=torch.min(0,scale_aug2_2-0.5)#(scale_aug2_1+scale_aug2_2)/2
+    kl_div_aug1=scale_1*kl_div_aug1
+    kl_div_aug2=scale_2*kl_div_aug2
+
+    # topk=0.8
+    # kl_div_aug1=kl_div_aug1.topk(int(topk*n_img),dim=0)[0]
+    # kl_div_aug2=kl_div_aug2.topk(int(topk*n_img),dim=0)[0]
 
     loss_jsd = 12 * (F.kl_div(p_mixture, p_clean, reduction='batchmean') +
                   torch.mean(kl_div_aug1) +
@@ -376,42 +345,27 @@ def train(net, train_loader, optimizer,scheduler):
 
     loss=loss_pred+loss_jsd
 
-    acc1, acc5 = accuracy(logits_clean, targets, topk=(1, 5))  # pylint: disable=unbalanced-tuple-unpacking
-
     loss.backward()
     lr=optimizer.param_groups[0]['lr']
     optimizer.step()
     scheduler.step()
-
-    # Compute batch computation time and update moving averages.
-    batch_time = time.time() - end
-    end = time.time()
-
-    data_ema = data_ema * 0.1 + float(data_time) * 0.9
-    batch_ema = batch_ema * 0.1 + float(batch_time) * 0.9
-    loss_ema = loss_ema * 0.1 + float(loss) * 0.9
-    acc1_ema = acc1_ema * 0.1 + float(acc1) * 0.9
-    acc5_ema = acc5_ema * 0.1 + float(acc5) * 0.9
-
+    loss_ema = loss_ema * 0.9 + float(loss) * 0.1
     if i % args.print_freq == 0:
       writer.add_scalar('Lr',lr,epoch*len(train_loader)+i)
       writer.add_scalar('Loss/Train Loss',loss_ema,epoch*len(train_loader)+i)
       writer.add_scalar('Loss/Loss_sum',loss,epoch*len(train_loader)+i)
       writer.add_scalar('Loss/Loss_pred',loss_pred,epoch*len(train_loader)+i)
       writer.add_scalar('Loss/Loss_jsd',loss_jsd,epoch*len(train_loader)+i)
+      # writer.add_scalar('Scale/aug1_mean',scale_aug1.mean().detach().cpu().numpy(),epoch*len(train_loader)+i)
+      # writer.add_scalar('Scale/aug1_std',scale_aug1.std().detach().cpu().numpy(),epoch*len(train_loader)+i)
+      # writer.add_scalar('Scale/aug2_mean',scale_aug2.mean().detach().cpu().numpy(),epoch*len(train_loader)+i)
+      # writer.add_scalar('Scale/aug2_std',scale_aug2.std().detach().cpu().numpy(),epoch*len(train_loader)+i)
 
       # for tag, value in net.named_parameters():
       #   tag = tag.replace('.', '/')
       #   writer.add_histogram(tag, value.data.cpu().numpy(), epoch*len(train_loader)+i)
       #   writer.add_histogram(tag+'/grad', value.grad.data.cpu().numpy(), epoch*len(train_loader)+i)
-
-      logger.info(
-          'Batch {}/{}: Data Time {:.3f} | Batch Time {:.3f} | Train Loss {:.3f} | Train Acc1 '
-          '{:.3f} | Train Acc5 {:.3f}'.format(i, len(train_loader), data_ema,
-                                              batch_ema, loss_ema, acc1_ema,
-                                              acc5_ema))
-
-  return loss_ema, acc1_ema, batch_ema
+  return loss_ema
 
 
 def test(net, test_loader):
@@ -431,6 +385,7 @@ def test(net, test_loader):
   return total_loss / len(test_loader.dataset), total_correct / len(
       test_loader.dataset)
 
+
 def test_my(net, test_loader):
   """Evaluate network on given dataset."""
   net.eval()
@@ -448,100 +403,119 @@ def test_my(net, test_loader):
 
   return total_correct1/len(test_loader.dataset), total_correct5/len(test_loader.dataset)
 
-def test_c(net, test_transform):
+
+def accuracy(output, target, topk=(1,)):
+    """Computes the accuracy over the k top predictions for the specified values of k"""
+    with torch.no_grad():
+        maxk = max(topk)
+        batch_size = target.size(0)
+
+        _, pred = output.topk(maxk, 1, True, True)
+        pred = pred.t()
+        correct = pred.eq(target.view(1, -1).expand_as(pred))
+
+        res = []
+        for k in topk:
+            correct_k = correct[:k].reshape(-1).float().sum(0, keepdim=True)
+            res.append(correct_k.mul_(100.0 / batch_size))
+        return res
+
+def test_c(net, test_data, base_path):
   """Evaluate network on given corrupted dataset."""
-  corruption_accs = {}
   corruption_acc1s = []
   corruption_acc5s = []
   for corruption in CORRUPTIONS:
-    # print(c)
-    for s in range(1, 6):
-      valdir = os.path.join(args.corrupted_data, corruption, str(s))
-      val_loader = torch.utils.data.DataLoader(
-          datasets.ImageFolder(valdir, test_transform),
-          batch_size=args.eval_batch_size,
-          shuffle=False,
-          num_workers=args.num_workers,
-          pin_memory=True)
-      acc1, acc5 = test_my(net, val_loader)
-      corruption_acc1s.append(acc1)
-      corruption_acc5s.append(acc5)
-      if corruption in corruption_accs:
-        corruption_accs[corruption].append(acc1)
-      else:
-        corruption_accs[corruption] = [acc1]
+    # Reference to original data is mutated
+    test_data.data = np.load(base_path + corruption + '.npy')
+    test_data.targets = torch.LongTensor(np.load(base_path + 'labels.npy'))
 
-      writer.add_scalar('corruption/'+corruption+'_'+str(s)+'_acc1', acc1,epoch)
-      writer.add_scalar('corruption/'+corruption+'_'+str(s)+'_acc5', acc5,epoch)
-      logger.info('{}_{} * Acc@1 {:.3f} Acc@5 {:.3f}'.format(corruption,str(s), acc1, acc5))
-  for i,corruption in enumerate(CORRUPTIONS):
-    logger.info('{} * Acc@1 {:.3f} Acc@5 {:.3f}'.format(corruption, np.mean(corruption_acc1s[5*i:5*(i+1)]), np.mean(corruption_acc5s[5*i:5*(i+1)])))
-  logger.info('Corruption 15* Acc@1 {:.3f} Acc@5 {:.3f}'.format(np.mean(corruption_acc1s[:-4*5]), np.mean(corruption_acc5s[:-4*5])))
-  logger.info('Corruption 19* Acc@1 {:.3f} Acc@5 {:.3f}'.format(np.mean(corruption_acc1s), np.mean(corruption_acc5s)))
-  return corruption_accs
+    test_loader_c = torch.utils.data.DataLoader(
+        test_data,
+        batch_size=args.eval_batch_size,
+        shuffle=False,
+        num_workers=args.num_workers,
+        pin_memory=False)
+
+    acc1, acc5 = test_my(net, test_loader_c)
+    corruption_acc1s.append(acc1)
+    corruption_acc5s.append(acc5)
+    writer.add_scalar('corruption/'+corruption+'_acc1', acc1,epoch)
+    writer.add_scalar('corruption/'+corruption+'_acc5', acc5,epoch)
+    logger.info('{} * Acc@1 {:.3f} Acc@5 {:.3f}'.format(corruption, acc1, acc5))
+  logger.info('Corruption 15* Acc@1 {:.3f} Acc@5 {:.3f}'.format(np.mean(corruption_acc1s[0:16]), np.mean(corruption_acc5s[0:16])))
+
+
+  return np.mean(corruption_acc1s),np.mean(corruption_acc5s)
 
 
 def main():
-  torch.manual_seed(1)
-  np.random.seed(1)
+  # torch.manual_seed(1)
+  # np.random.seed(1)
 
   # Load datasets
-  mean = [0.485, 0.456, 0.406]
-  std = [0.229, 0.224, 0.225]
   train_transform = transforms.Compose(
-      [transforms.RandomResizedCrop(224),
-       transforms.RandomHorizontalFlip()])
+      [transforms.RandomHorizontalFlip(),
+       transforms.RandomCrop(32, padding=4)])
   preprocess = transforms.Compose(
       [transforms.ToTensor(),
-       transforms.Normalize(mean, std)])
-  test_transform = transforms.Compose([
-      transforms.Resize(256),
-      transforms.CenterCrop(224),
-      preprocess,
-  ])
+       transforms.Normalize([0.5] * 3, [0.5] * 3)])
+  test_transform = preprocess
 
   device=socket.gethostname()
-  if 'estar-403'==device: root_dataset_dir='/home/estar/Datasets/'
-  elif 'Jet'==device: root_dataset_dir='/mnt/sdb/zhangzhuang/Datasets/'
-  elif '1080x4-1'==device: root_dataset_dir='/home/zhangzhuang/Datasets/'
-  elif 'ubuntu204'==device: root_dataset_dir='/media/ubuntu204/F/Dataset/'
+  if 'estar-403'==device: root_dataset_dir='/home/estar/Datasets'
+  elif 'Jet'==device: root_dataset_dir='/mnt/sdb/zhangzhuang/Datasets'
+  elif '1080x4-1'==device: root_dataset_dir='/home/zhangzhuang/Datasets'
+  elif 'ubuntu204'==device: root_dataset_dir='/media/ubuntu204/F/Dataset'
   else: raise Exception('Wrong device')
-  root_dataset_dir=root_dataset_dir+'ILSVRC2012-'+str(args.num_classes)
-  args.clean_data=root_dataset_dir
-  args.corrupted_data=root_dataset_dir+'-C'
 
-  traindir = os.path.join(args.clean_data, 'train')
-  valdir = os.path.join(args.clean_data, 'val')
-  train_dataset = datasets.ImageFolder(traindir, train_transform)
-  train_dataset = AugMixDataset(train_dataset, preprocess)
+  if args.dataset == 'cifar10':
+    train_data = datasets.CIFAR10(
+        root_dataset_dir+'/cifar-10', train=True, transform=train_transform, download=True)
+    test_data = datasets.CIFAR10(
+        root_dataset_dir+'/cifar-10', train=False, transform=test_transform, download=True)
+    base_c_path = root_dataset_dir+'/cifar-10-c/'
+    num_classes = 10
+  else:
+    train_data = datasets.CIFAR100(
+       root_dataset_dir+'/cifar-100', train=True, transform=train_transform, download=True)
+    test_data = datasets.CIFAR100(
+       root_dataset_dir+'/cifar-100', train=False, transform=test_transform, download=True)
+    base_c_path = root_dataset_dir+'/cifar-100-c/'
+    num_classes = 100
+
+  train_data = AugMixDataset(train_data, preprocess, args.no_jsd)
   train_loader = torch.utils.data.DataLoader(
-      train_dataset,
+      train_data,
       batch_size=args.batch_size,
       shuffle=True,
+      drop_last=False,
       num_workers=args.num_workers,
-      pin_memory=True)
-  val_loader = torch.utils.data.DataLoader(
-      datasets.ImageFolder(valdir, test_transform),
-      batch_size=args.batch_size,
-      shuffle=False,
-      num_workers=args.num_workers)
+      pin_memory=False)
 
-  if args.pretrained:
-    logger.info("=> using pre-trained model '{}'".format(args.model))
-    net = models.__dict__[args.model](pretrained=True)
-  else:
-    logger.info("=> creating model '{}'".format(args.model))
-    net = models.__dict__[args.model]()
+  test_loader = torch.utils.data.DataLoader(
+      test_data,
+      batch_size=args.eval_batch_size,
+      shuffle=False,
+      drop_last=False,
+      num_workers=args.num_workers,
+      pin_memory=False)
+
+  # Create model
+  if args.model == 'densenet':
+    net = densenet(num_classes=num_classes)
+  elif args.model == 'wrn':
+    net = WideResNet(args.layers, num_classes, args.widen_factor, args.droprate)
+  elif args.model == 'allconv':
+    net = AllConvNet(num_classes)
+  elif args.model == 'resnext':
+    net = resnext29(num_classes=num_classes)
 
   optimizer = torch.optim.SGD(
       net.parameters(),
       args.learning_rate,
       momentum=args.momentum,
-      weight_decay=args.decay)
-  scheduler =torch.optim.lr_scheduler.OneCycleLR(optimizer,
-                                                 total_steps=args.epochs*len(train_loader),
-                                                 max_lr=args.learning_rate*args.batch_size / 256,
-                                                 three_phase=False)
+      weight_decay=args.decay,
+      nesterov=True)
 
   # Distribute model across all visible GPUs
   net = torch.nn.DataParallel(net).cuda()
@@ -550,26 +524,28 @@ def main():
   start_epoch = 0
   global epoch
   epoch=0
+
+
   if args.resume:
     if os.path.isfile(args.resume):
       checkpoint = torch.load(args.resume)
-      start_epoch = checkpoint['epoch'] + 1
-      best_acc1 = checkpoint['best_acc1']
+
       net.load_state_dict(checkpoint['state_dict'])
       optimizer.load_state_dict(checkpoint['optimizer'])
-      logger.info('Model restored from epoch:{}'.format(start_epoch))
+      logger.info('Model restored from {}'.format(args.resume))
 
   if args.evaluate:
-    test_loss, test_acc1 = test(net, val_loader)
-    logger.info('Clean\n\tTest Loss {:.3f} | Test Acc1 {:.3f}'.format(
-        test_loss, 100 * test_acc1))
-
-    corruption_accs = test_c(net, test_transform)
-    for c in CORRUPTIONS:
-      logger.info('\t'.join([c] + map(str, corruption_accs[c])))
-
-    logger.info('mCE (normalized by AlexNet): ', compute_mce(corruption_accs))
+    mce1, mce5 = test_c(net, test_data, base_c_path)
+    logger.info('Corruption mean * Acc@1 {:.3f} Acc@5 {:.3f}'.format(mce1, mce5))
     return
+
+  scheduler = torch.optim.lr_scheduler.LambdaLR(
+      optimizer,
+      lr_lambda=lambda step: get_lr(  # pylint: disable=g-long-lambda
+          step,
+          args.epochs * len(train_loader),
+          1,  # lr_lambda computes multiplicative factor
+          1e-6 / args.learning_rate))
 
   if not os.path.exists(args.save):
     os.makedirs(args.save)
@@ -577,27 +553,26 @@ def main():
     raise Exception('%s is not a dir' % args.save)
 
   log_path = os.path.join(args.save,
-                          'imagenet_{}_training_log.csv'.format(args.model))
+                          args.dataset + '_' + args.model + '_training_log.csv')
   with open(log_path, 'w') as f:
-    f.write(
-        'epoch,batch_time,train_loss,train_acc1(%),test_loss,test_acc1(%)\n')
+    f.write('epoch,time(s),train_loss,test_loss,test_error(%)\n')
 
-  best_acc1 = 0
+  best_acc = 0
   logger.info('Beginning training from epoch:{}'.format(start_epoch + 1))
   for epoch in range(start_epoch, args.epochs):
-    # adjust_learning_rate(optimizer, epoch)
+    begin_time = time.time()
 
-    train_loss_ema, train_acc1_ema, batch_ema = train(net, train_loader,
-                                                      optimizer,scheduler)
-    test_loss, test_acc1 = test(net, val_loader)
+    train_loss_ema = train(net, train_loader, optimizer, scheduler)
+    test_loss, test_acc = test(net, test_loader)
 
-    is_best = test_acc1 > best_acc1
-    best_acc1 = max(test_acc1, best_acc1)
+    is_best = test_acc > best_acc
+    best_acc = max(test_acc, best_acc)
     checkpoint = {
         'epoch': epoch,
+        'dataset': args.dataset,
         'model': args.model,
         'state_dict': net.state_dict(),
-        'best_acc1': best_acc1,
+        'best_acc': best_acc,
         'optimizer': optimizer.state_dict(),
     }
 
@@ -607,29 +582,31 @@ def main():
       shutil.copyfile(save_path, os.path.join(args.save, 'model_best.pth.tar'))
 
     with open(log_path, 'a') as f:
-      f.write('%03d,%0.3f,%0.6f,%0.2f,%0.5f,%0.2f\n' % (
+      f.write('%03d,%05d,%0.6f,%0.5f,%0.2f\n' % (
           (epoch + 1),
-          batch_ema,
+          time.time() - begin_time,
           train_loss_ema,
-          100. * train_acc1_ema,
           test_loss,
-          100. * test_acc1,
+          100 - 100. * test_acc,
       ))
 
     writer.add_scalar('Total/Train Loss', train_loss_ema,epoch)
     writer.add_scalar('Total/Test Loss', train_loss_ema,epoch)
-    writer.add_scalar('Total/Test Acc', 100*test_acc1,epoch)
+    writer.add_scalar('Total/Test Acc', 100*test_acc,epoch)
 
     logger.info(
-        'Epoch {:3d} | Train Loss {:.4f} | Test Loss {:.3f} | Test Acc1 '
-        '{:.2f}'
-        .format((epoch + 1), train_loss_ema, test_loss, 100. * test_acc1))
+        'Epoch {0:3d} | Time {1:5d} | Train Loss {2:.4f} | Test Loss {3:.3f} |'
+        ' Test Error {4:.2f}'
+        .format((epoch + 1), int(time.time() - begin_time), train_loss_ema,
+                test_loss, 100 - 100. * test_acc))
 
-  corruption_accs = test_c(net, test_transform)
-  for c in CORRUPTIONS:
-    logger.info('\t'.join(map(str, [c] + corruption_accs[c])))
+  mce1, mce5 = test_c(net, test_data, base_c_path)
+  logger.info('C_Acc1: {:.3f}, C_Acc5: {:.3f}'.format(mce1, mce5))
 
-  # logger.info('mCE (normalized by AlexNet):', compute_mce(corruption_accs))
+  with open(log_path, 'a') as f:
+    f.write('%03d,%05d,%0.6f,%0.5f,%0.2f\n' %
+            (args.epochs + 1, 0, 0, 0, 100 - mce1))
+
 
 def get_preds_and_features(model,images,model_name):
     features_tmp = {}
@@ -639,8 +616,11 @@ def get_preds_and_features(model,images,model_name):
       features_tmp[output.device].append(output)
 
     handles=[]
-    if 'resnet50'== model_name: handles.append(model.module.layer4.register_forward_hook(hook))
-    else: raise Exception('{} not supported'.format(model_name))
+    if 'allconv'==model_name: handles.append(model.module.features.register_forward_hook(hook))
+    elif 'wrn'==model_name: handles.append(model.module.bn1.register_forward_hook(hook))
+    elif 'resnext'==model_name: handles.append(model.module.avgpool.register_forward_hook(hook))
+    elif 'densenet'==model_name: handles.append(model.module.bn1.register_forward_hook(hook))
+    else: raise Exception('model_name not supported')
 
 
     preds = model(images)
@@ -659,6 +639,7 @@ def get_preds_and_features(model,images,model_name):
 
 if __name__ == '__main__':
 
+  g.setup_seed(args.seed)
   '''
   初始化日志系统
   '''

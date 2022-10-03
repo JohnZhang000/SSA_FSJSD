@@ -1,0 +1,1 @@
+python main_imagenet.py --num_classes 10 --epochs 2 --num_workers 16

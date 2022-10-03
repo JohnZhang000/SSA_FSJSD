@@ -25,10 +25,11 @@ import socket
 saved_dir=''
 parser = argparse.ArgumentParser(description='Trains a CIFAR Classifier')
 parser.add_argument('--dir', default='')
-parser.add_argument('--gpu', default='0')
+parser.add_argument('--gpu', default='0,1,2,3')
 parser.add_argument('--cpus', type=int, default=4)
 # dataset:
 parser.add_argument('--dataset', '--ds', default='tin', choices=['cifar10', 'cifar100', 'tin', 'IN'], help='which dataset to use')
+parser.add_argument('--num_classes', '--ncs', type=int, default=10, help='num classes of dataset')
 parser.add_argument('--data_root_path', '--drp', default='/ssd1/haotao/datasets/', help='Where you save all your datasets.')
 parser.add_argument('--model', '--md', default='ResNet50_DuBIN', choices=['ResNet50_DuBIN','ResNet18_DuBIN', 'WRN40_DuBIN', 'ResNeXt29_DuBIN'], help='which model to use')
 parser.add_argument('--widen_factor', '--widen', default=2, type=int, help='widen factor for WRN')
@@ -68,7 +69,7 @@ else: raise Exception('Wrong device')
 args.data_root_path=root_dataset_dir
 # model:
 if args.dataset == 'IN':
-    model_fn = INResNet18_DuBIN
+    model_fn = INResNet50_DuBIN
 elif args.dataset == 'tin':
     if args.model == 'ResNet18_DuBIN':
         model_fn = ResNet18_DuBIN
@@ -94,10 +95,11 @@ if args.dataset in ['cifar10', 'cifar100']:
 elif args.dataset == 'tin':
     num_classes, init_stride = 200, 2
 elif args.dataset == 'IN':
-    num_classes, init_stride = 1000, None
+    num_classes, init_stride = args.num_classes, None
+    # init_stride=None
 
 if args.dataset == 'IN':
-    model = model_fn().cuda()
+    model = model_fn(num_classes=num_classes).cuda()
 elif args.dataset == 'tin':
     model = model_fn(num_classes=num_classes).cuda()
 else:
@@ -430,7 +432,7 @@ def val_IN_c():
         test_seen_c_loader_list_c = []
         for severity in range(1,6):
             test_c_loader_c_s = imagenet_c_testloader(corruption=corruption, severity=severity, 
-                data_dir=os.path.join(args.data_root_path, 'ImageNet-C'),
+                data_dir=os.path.join(args.data_root_path, 'ILSVRC2012-'+str(num_classes)+'-C'),
                 test_batch_size=args.test_batch_size, num_workers=args.cpus)
             test_seen_c_loader_list_c.append(test_c_loader_c_s)
         test_seen_c_loader_list.append(test_seen_c_loader_list_c)

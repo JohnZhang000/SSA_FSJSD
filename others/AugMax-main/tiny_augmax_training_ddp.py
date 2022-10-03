@@ -41,11 +41,12 @@ parser.add_argument('--gpu', default='0,1,2,3')
 parser.add_argument('--num_workers', '--cpus', default=16, type=int)
 # dataset:
 parser.add_argument('--dataset', '--ds', default='tin', choices=['cifar10', 'cifar100', 'tin', 'IN'], help='which dataset to use')
+parser.add_argument('--num_classes', '--ncs', default=10, type=int)
 parser.add_argument('--data_root_path', '--drp', help='Where you save all your datasets.')
 parser.add_argument('--model', '--md', default='ResNet50', choices=['ResNet18', 'ResNet50', 'WRN40', 'ResNeXt29'], help='which model to use')
 parser.add_argument('--widen_factor', '--widen', default=2, type=int, help='widen factor for WRN')
 # Optimization options
-parser.add_argument('--epochs', '-e', type=int, default=2, help='Number of epochs to train.')
+parser.add_argument('--epochs', '-e', type=int, default=200, help='Number of epochs to train.')
 parser.add_argument('--decay_epochs', '--de', default=[100,150], nargs='+', type=int, help='milestones for multisteps lr decay')
 parser.add_argument('--opt', default='sgd', choices=['sgd', 'adam'], help='which optimizer to use')
 parser.add_argument('--decay', default='cos', choices=['cos', 'multisteps'], help='which lr decay method to use')
@@ -193,8 +194,8 @@ def train(gpu_id, ngpus_per_node):
             )
             train_data = torch.utils.data.ConcatDataset([train_data, edsr_data, cae_data])
     elif args.dataset == 'IN':
-        num_classes, init_stride = 1000, None
-        train_data, val_data = imagenet_dataloaders(data_dir=os.path.join(args.data_root_path, 'imagenet'), 
+        num_classes, init_stride = args.num_classes, None
+        train_data, val_data = imagenet_dataloaders(data_dir=os.path.join(args.data_root_path, 'ILSVRC2012-'+str(num_classes)), 
             AugMax=AugMaxDataset, mixture_width=args.mixture_width, mixture_depth=args.mixture_depth, aug_severity=args.aug_severity
         )
         if args.deepaug:
@@ -209,6 +210,8 @@ def train(gpu_id, ngpus_per_node):
         train_sampler = torch.utils.data.distributed.DistributedSampler(train_data)
     else:
         train_sampler = None
+    print('train_dir:{}'.format(train_data))
+    print('val_dir:{}'.format(val_data))
     train_loader = DataLoader(train_data, batch_size=train_batch_size, shuffle=(train_sampler is None), num_workers=num_workers, pin_memory=True, sampler=train_sampler)
     val_loader = DataLoader(val_data, batch_size=args.test_batch_size, shuffle=False, num_workers=num_workers, pin_memory=True)
 
@@ -217,7 +220,7 @@ def train(gpu_id, ngpus_per_node):
         if args.model == 'WRN40':
             model = model_fn(widen_factor=args.widen_factor).to(device)
         else:
-            model = model_fn().to(device)
+            model = model_fn(num_classes=num_classes).to(device)
     elif args.dataset == 'tin':
         model = model_fn(num_classes=num_classes).to(device)
     else:
@@ -390,7 +393,11 @@ def train(gpu_id, ngpus_per_node):
     # tiny_test.args.ckpt_path=saved_dir
     # tiny_test.args.save_root_path=saved_dir
     # tiny_test.val_tin_c()
-    os.system('python tiny_test.py --dir {}'.format(saved_dir))
+    # os.system('python tiny_test.py --dir {}'.format(saved_dir))
+    del model
+    torch.cuda.empty_cache()
+    time.sleep(30)
+    os.system('python tiny_test.py --dir {} --dataset {} --num_classes {} --test_batch_size {}'.format(saved_dir,'IN',num_classes, 128))
 
 
 if __name__ == '__main__':

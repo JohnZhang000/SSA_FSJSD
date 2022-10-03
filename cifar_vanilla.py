@@ -26,6 +26,7 @@ import argparse
 import os
 import shutil
 import time
+import socket
 
 import augmentations
 from models.allconv import AllConvNet
@@ -36,19 +37,9 @@ from models.third_party.WideResNet_pytorch.wideresnet import WideResNet
 
 import torch
 import torch.backends.cudnn as cudnn
-import torch.nn as nn
 import torch.nn.functional as F
 from torchvision import datasets
 from torchvision import transforms
-import logging
-import general as g
-import socket
-from torch.utils.tensorboard import SummaryWriter
-
-now = time.strftime("%Y-%m-%d-%H_%M_%S",time.localtime(time.time())) 
-saved_dir=os.path.join('./results',now)
-if not os.path.exists(saved_dir):
-    os.makedirs(saved_dir)
 
 parser = argparse.ArgumentParser(
     description='Trains a CIFAR Classifier',
@@ -99,14 +90,9 @@ parser.add_argument(
     help='Number of augmentation chains to mix per augmented example')
 parser.add_argument(
     '--mixture-depth',
-    default=4,
+    default=-1,
     type=int,
     help='Depth of augmentation chains. -1 denotes stochastic depth in [1, 3]')
-parser.add_argument(
-    '--aug-std',
-    '-as',
-    action='store_true',
-    help='Turn off my augment.')
 parser.add_argument(
     '--aug-severity',
     default=3,
@@ -127,7 +113,7 @@ parser.add_argument(
     '--save',
     '-s',
     type=str,
-    default=saved_dir,
+    default='./snapshots_vanilla',
     help='Folder to save checkpoints.')
 parser.add_argument(
     '--resume',
@@ -145,65 +131,10 @@ parser.add_argument(
 parser.add_argument(
     '--num-workers',
     type=int,
-    default=16,
+    default=4,
     help='Number of pre-fetching threads.')
-parser.add_argument(
-    '--imp_thresh',
-    type=float,
-    default=0.5,
-    help='r thresh for impulse noise')
-parser.add_argument(
-    '--contrast_scale',
-    type=float,
-    default=1.0,
-    help='r thresh for impulse noise')
-parser.add_argument(
-    '--noise_scale',
-    type=float,
-    default=0.5,
-    help='r thresh for impulse noise')
-parser.add_argument(
-    '--topk',
-    type=float,
-    default=0.5,
-    help='r thresh for impulse noise')
-parser.add_argument(
-    '--topk_epoch',
-    type=float,
-    default=0.6,
-    help='r thresh for impulse noise')
-parser.add_argument(
-    '--no_fsim',
-    '-nfs',
-    action='store_true',
-    help='Turn off feature similiarity loss.')
-parser.add_argument(
-    '--no_topk',
-    '-ntk',
-    action='store_true',
-    help='Turn off topk loss.')
-parser.add_argument(
-    '--no_timei',
-    '-nti',
-    action='store_true',
-    help='Turn off time invariant loss.')
-parser.add_argument(
-    '--alpha',
-    type=float,
-    default=3.0,
-    help='r thresh for impulse noise')
-parser.add_argument(
-    '--seed',
-    type=int,
-    default=1,
-    help='random seed')
 
 args = parser.parse_args()
-augmentations.IMPULSE_THRESH = args.imp_thresh
-augmentations.CONTRAST_SCALE = args.contrast_scale
-augmentations.NOISE_SCALE = args.noise_scale
-TOPK=args.topk
-TOPk_EPOCH=int(args.topk_epoch*args.epochs)
 
 CORRUPTIONS = [
     'defocus_blur', 'glass_blur', 'motion_blur', 'zoom_blur',
@@ -211,6 +142,7 @@ CORRUPTIONS = [
     'gaussian_noise', 'impulse_noise',  'shot_noise', 
     'brightness', 'fog', 'frost','snow',
     'gaussian_blur', 'saturate', 'spatter', 'speckle_noise'
+    
 ]
 
 
@@ -230,10 +162,7 @@ def aug(image, preprocess):
   Returns:
     mixed: Augmented and mixed image.
   """
-  if args.aug_std:
-    aug_list = augmentations.augmentations_std
-  else:
-    aug_list = augmentations.augmentations
+  aug_list = augmentations.augmentations
   if args.all_ops:
     aug_list = augmentations.augmentations_all
 
@@ -243,7 +172,8 @@ def aug(image, preprocess):
   mix = torch.zeros_like(preprocess(image))
   for i in range(args.mixture_width):
     image_aug = image.copy()
-    depth = np.random.randint(1, args.mixture_depth)
+    depth = args.mixture_depth if args.mixture_depth > 0 else np.random.randint(
+        1, 4)
     for _ in range(depth):
       op = np.random.choice(aug_list)
       image_aug = op(image_aug, args.aug_severity)
@@ -274,13 +204,6 @@ class AugMixDataset(torch.utils.data.Dataset):
   def __len__(self):
     return len(self.dataset)
 
-def select_topk(p_y,y):
-    target_onehot=torch.zeros_like(p_y).scatter_(1, y.reshape(-1,1), 1)
-    target_logits=torch.sum(p_y*target_onehot,axis=1)
-    n_correct=torch.sum((target_logits>0.5))
-    topk_aug1=target_logits.topk(int(TOPK*(len(y)-n_correct)+n_correct),dim=0)[0][-1]
-    topk=target_logits>topk_aug1
-    return topk
 
 def train(net, train_loader, optimizer, scheduler):
   """Train for one epoch."""
@@ -289,79 +212,39 @@ def train(net, train_loader, optimizer, scheduler):
   for i, (images, targets) in enumerate(train_loader):
     optimizer.zero_grad()
 
-    logits_clean,features_clean=get_preds_and_features(net,images[0].cuda(),args.model)
-    logits_aug1,features_aug1=get_preds_and_features(net,images[1].cuda(),args.model)
-    logits_aug2,features_aug2=get_preds_and_features(net,images[2].cuda(),args.model)
-
-    targets=targets.cuda()
-    # loss for pred
-    n_img=len(targets)
-    loss_pred = F.cross_entropy(logits_clean, targets)
-
-    # loss for jsd
-    loss_jsd=0.
-    p_clean, p_aug1, p_aug2 = F.softmax(
-        logits_clean, dim=1), F.softmax(
-            logits_aug1, dim=1), F.softmax(
-                logits_aug2, dim=1)
-    p_mixture = torch.clamp((p_clean + p_aug1 + p_aug2) / 3., 1e-7, 1).log()
-
-    # with feature similarity
-    if not args.no_fsim:
-      features_clean=features_clean.reshape(n_img,-1)
-      features_aug1=features_aug1.reshape(n_img,-1)
-      features_aug2=features_aug2.reshape(n_img,-1)
-
-      features_clean_mean=features_clean#torch.mean(features_clean,dim=0).reshape(1,-1).repeat_interleave(n_img,dim=0)
-      sim_aug1=F.cosine_similarity(features_clean_mean,features_aug1,axis=-1).cuda()
-      sim_aug2=F.cosine_similarity(features_clean_mean,features_aug2,axis=-1).cuda()
-      scale_aug1=torch.exp(args.alpha*(1-sim_aug1))
-      scale_aug2=torch.exp(args.alpha*(1-sim_aug2))
-
-    #   if not args.no_topk:
-    #     # with topk
-    #     topk_aug1=select_topk(p_aug1,targets)
-    #     topk_aug2=select_topk(p_aug2,targets)
-    #     scale_epoch=1
-    #     if not args.no_timei:
-    # #       # with time invariant
-    #       scale_epoch=np.exp(min(0,TOPk_EPOCH-epoch))          
-    #     scale_aug1=scale_aug1*((~topk_aug1)*scale_epoch+topk_aug1)
-    #     scale_aug2=scale_aug2*((~topk_aug2)*scale_epoch+topk_aug2)
-
-      kl_div_aug1=scale_aug1*F.kl_div(p_mixture, p_aug1, reduction='none').mean(axis=-1)
-      kl_div_aug2=scale_aug2*F.kl_div(p_mixture, p_aug2, reduction='none').mean(axis=-1)
+    if True:
+      images = images.cuda()
+      targets = targets.cuda()
+      logits = net(images)
+      loss = F.cross_entropy(logits, targets)
     else:
-    #   # print('No scale')
-      kl_div_aug1=F.kl_div(p_mixture, p_aug1, reduction='none').mean(axis=-1)
-      kl_div_aug2=F.kl_div(p_mixture, p_aug2, reduction='none').mean(axis=-1)
+      images_all = torch.cat(images, 0).cuda()
+      targets = targets.cuda()
+      logits_all = net(images_all)
+      logits_clean, logits_aug1, logits_aug2 = torch.split(
+          logits_all, images[0].size(0))
 
-    loss_jsd = 12 * (F.kl_div(p_mixture, p_clean, reduction='batchmean') +
-                  torch.mean(kl_div_aug1) +
-                  torch.mean(kl_div_aug2)) / 3.
+      # Cross-entropy is only computed on clean images
+      loss = F.cross_entropy(logits_clean, targets)
 
-    loss=loss_pred+loss_jsd
+      p_clean, p_aug1, p_aug2 = F.softmax(
+          logits_clean, dim=1), F.softmax(
+              logits_aug1, dim=1), F.softmax(
+                  logits_aug2, dim=1)
+
+      # Clamp mixture distribution to avoid exploding KL divergence
+      p_mixture = torch.clamp((p_clean + p_aug1 + p_aug2) / 3., 1e-7, 1).log()
+      loss += 12 * (F.kl_div(p_mixture, p_clean, reduction='batchmean') +
+                    F.kl_div(p_mixture, p_aug1, reduction='batchmean') +
+                    F.kl_div(p_mixture, p_aug2, reduction='batchmean')) / 3.
 
     loss.backward()
-    lr=optimizer.param_groups[0]['lr']
     optimizer.step()
     scheduler.step()
     loss_ema = loss_ema * 0.9 + float(loss) * 0.1
     if i % args.print_freq == 0:
-      writer.add_scalar('Lr',lr,epoch*len(train_loader)+i)
-      writer.add_scalar('Loss/Train Loss',loss_ema,epoch*len(train_loader)+i)
-      writer.add_scalar('Loss/Loss_sum',loss,epoch*len(train_loader)+i)
-      writer.add_scalar('Loss/Loss_pred',loss_pred,epoch*len(train_loader)+i)
-      writer.add_scalar('Loss/Loss_jsd',loss_jsd,epoch*len(train_loader)+i)
-      # writer.add_scalar('Scale/aug1_mean',scale_aug1.mean().detach().cpu().numpy(),epoch*len(train_loader)+i)
-      # writer.add_scalar('Scale/aug1_std',scale_aug1.std().detach().cpu().numpy(),epoch*len(train_loader)+i)
-      # writer.add_scalar('Scale/aug2_mean',scale_aug2.mean().detach().cpu().numpy(),epoch*len(train_loader)+i)
-      # writer.add_scalar('Scale/aug2_std',scale_aug2.std().detach().cpu().numpy(),epoch*len(train_loader)+i)
+      print('Train Loss {:.3f}'.format(loss_ema))
 
-      # for tag, value in net.named_parameters():
-      #   tag = tag.replace('.', '/')
-      #   writer.add_histogram(tag, value.data.cpu().numpy(), epoch*len(train_loader)+i)
-      #   writer.add_histogram(tag+'/grad', value.grad.data.cpu().numpy(), epoch*len(train_loader)+i)
   return loss_ema
 
 
@@ -426,33 +309,31 @@ def test_c(net, test_data, base_path):
     test_data.data = np.load(base_path + corruption + '.npy')
     test_data.targets = torch.LongTensor(np.load(base_path + 'labels.npy'))
 
-    test_loader_c = torch.utils.data.DataLoader(
+    test_loader = torch.utils.data.DataLoader(
         test_data,
         batch_size=args.eval_batch_size,
         shuffle=False,
         num_workers=args.num_workers,
-        pin_memory=False)
+        pin_memory=True)
 
-    acc1, acc5 = test_my(net, test_loader_c)
+    acc1, acc5 = test_my(net, test_loader)
     corruption_acc1s.append(acc1)
     corruption_acc5s.append(acc5)
-    writer.add_scalar('corruption/'+corruption+'_acc1', acc1,epoch)
-    writer.add_scalar('corruption/'+corruption+'_acc5', acc5,epoch)
-    logger.info('{} * Acc@1 {:.3f} Acc@5 {:.3f}'.format(corruption, acc1, acc5))
-  logger.info('Corruption 15* Acc@1 {:.3f} Acc@5 {:.3f}'.format(np.mean(corruption_acc1s[0:16]), np.mean(corruption_acc5s[0:16])))
-
+    print('{}\n\t  * Acc@1 {:.3f} Acc@5 {:.3f}'.format(corruption, acc1, acc5))
 
   return np.mean(corruption_acc1s),np.mean(corruption_acc5s)
 
 
 def main():
-  # torch.manual_seed(1)
-  # np.random.seed(1)
+  torch.manual_seed(1)
+  np.random.seed(1)
 
   # Load datasets
   train_transform = transforms.Compose(
       [transforms.RandomHorizontalFlip(),
-       transforms.RandomCrop(32, padding=4)])
+       transforms.RandomCrop(32, padding=4),
+       transforms.ToTensor(),
+       transforms.Normalize([0.5] * 3, [0.5] * 3)])
   preprocess = transforms.Compose(
       [transforms.ToTensor(),
        transforms.Normalize([0.5] * 3, [0.5] * 3)])
@@ -474,28 +355,26 @@ def main():
     num_classes = 10
   else:
     train_data = datasets.CIFAR100(
-       root_dataset_dir+'/cifar-100', train=True, transform=train_transform, download=True)
+        './data/cifar', train=True, transform=train_transform, download=True)
     test_data = datasets.CIFAR100(
-       root_dataset_dir+'/cifar-100', train=False, transform=test_transform, download=True)
-    base_c_path = root_dataset_dir+'/cifar-100-c/'
+        './data/cifar', train=False, transform=test_transform, download=True)
+    base_c_path = './data/cifar/CIFAR-100-C/'
     num_classes = 100
 
-  train_data = AugMixDataset(train_data, preprocess, args.no_jsd)
+  # train_data = AugMixDataset(train_data, preprocess, args.no_jsd)
   train_loader = torch.utils.data.DataLoader(
       train_data,
       batch_size=args.batch_size,
       shuffle=True,
-      drop_last=False,
       num_workers=args.num_workers,
-      pin_memory=False)
+      pin_memory=True)
 
   test_loader = torch.utils.data.DataLoader(
       test_data,
       batch_size=args.eval_batch_size,
       shuffle=False,
-      drop_last=False,
       num_workers=args.num_workers,
-      pin_memory=False)
+      pin_memory=True)
 
   # Create model
   if args.model == 'densenet':
@@ -519,21 +398,25 @@ def main():
   cudnn.benchmark = True
 
   start_epoch = 0
-  global epoch
-  epoch=0
-
 
   if args.resume:
     if os.path.isfile(args.resume):
       checkpoint = torch.load(args.resume)
-
+      start_epoch = checkpoint['epoch'] + 1
+      # best_acc = checkpoint['best_acc']
       net.load_state_dict(checkpoint['state_dict'])
       optimizer.load_state_dict(checkpoint['optimizer'])
-      logger.info('Model restored from {}'.format(args.resume))
+      # net.load_state_dict(checkpoint['model_state_dict'])
+      # optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+      print('Model restored from epoch:', start_epoch)
 
   if args.evaluate:
+    # Evaluate clean accuracy first because test_c mutates underlying data
+    acc1, acc5 = test_my(net, test_loader)
+    print('Clean\n\t * Acc@1 {:.3f} Acc@5 {:.3f}'.format(acc1, acc5))
+
     mce1, mce5 = test_c(net, test_data, base_c_path)
-    logger.info('Corruption mean * Acc@1 {:.3f} Acc@5 {:.3f}'.format(mce1, mce5))
+    print('Corruption mean\n\t * Acc@1 {:.3f} Acc@5 {:.3f}'.format(mce1, mce5))
     return
 
   scheduler = torch.optim.lr_scheduler.LambdaLR(
@@ -555,7 +438,7 @@ def main():
     f.write('epoch,time(s),train_loss,test_loss,test_error(%)\n')
 
   best_acc = 0
-  logger.info('Beginning training from epoch:{}'.format(start_epoch + 1))
+  print('Beginning training from epoch:', start_epoch + 1)
   for epoch in range(start_epoch, args.epochs):
     begin_time = time.time()
 
@@ -587,81 +470,19 @@ def main():
           100 - 100. * test_acc,
       ))
 
-    writer.add_scalar('Total/Train Loss', train_loss_ema,epoch)
-    writer.add_scalar('Total/Test Loss', train_loss_ema,epoch)
-    writer.add_scalar('Total/Test Acc', 100*test_acc,epoch)
-
-    logger.info(
+    print(
         'Epoch {0:3d} | Time {1:5d} | Train Loss {2:.4f} | Test Loss {3:.3f} |'
         ' Test Error {4:.2f}'
         .format((epoch + 1), int(time.time() - begin_time), train_loss_ema,
                 test_loss, 100 - 100. * test_acc))
 
   mce1, mce5 = test_c(net, test_data, base_c_path)
-  logger.info('C_Acc1: {:.3f}, C_Acc5: {:.3f}'.format(mce1, mce5))
+  print('MCE1: {:.3f}, MCE5: {:.3f}'.format(100 - mce1, 100 - mce5))
 
   with open(log_path, 'a') as f:
     f.write('%03d,%05d,%0.6f,%0.5f,%0.2f\n' %
             (args.epochs + 1, 0, 0, 0, 100 - mce1))
 
 
-def get_preds_and_features(model,images,model_name):
-    features_tmp = {}
-    def hook(module, input, output): 
-      if output.device not in features_tmp.keys():
-        features_tmp[output.device]=[]
-      features_tmp[output.device].append(output)
-
-    handles=[]
-    if 'allconv'==model_name: handles.append(model.module.features.register_forward_hook(hook))
-    elif 'wrn'==model_name: handles.append(model.module.bn1.register_forward_hook(hook))
-    elif 'resnext'==model_name: handles.append(model.module.avgpool.register_forward_hook(hook))
-    elif 'densenet'==model_name: handles.append(model.module.bn1.register_forward_hook(hook))
-    else: raise Exception('model_name not supported')
-
-
-    preds = model(images)
-    for handle in handles:
-      handle.remove()
-
-    # gather feature to the same device
-    features=[]
-    device_keys=list(features_tmp.keys())
-    for key in device_keys:
-        features.append(features_tmp[key][0].cuda(0))
-    features=torch.cat(features,dim=0)
-    return preds,features
-
-
-
 if __name__ == '__main__':
-
-  g.setup_seed(args.seed)
-  '''
-  初始化日志系统
-  '''
-  set_level=logging.INFO
-  logger=logging.getLogger(name='r')
-  logger.setLevel(set_level)
-  formatter=logging.Formatter(
-      '%(asctime)s - %(name)s - %(levelname)s -%(message)s',
-      datefmt='%Y-%m-%d %H:%M:%S')
-
-  fh=logging.FileHandler(os.path.join(saved_dir,'log_train.log'))
-  fh.setLevel(set_level)
-  fh.setFormatter(formatter)
-
-  ch=logging.StreamHandler()
-  ch.setLevel(set_level)
-  ch.setFormatter(formatter)
-
-  logger.addHandler(ch)
-  logger.addHandler(fh)
-  # g.setup_seed(0)
-
-  logger.info(args)
-
-  writer = SummaryWriter(saved_dir)
-
-
   main()

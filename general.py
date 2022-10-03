@@ -114,30 +114,29 @@ class dataset_setting():
             self.input_shape=(3,32,32)   
             self.batch_size=256      
 
-    #     elif 'cifar-10-c'==dataset_name:
-    #         if select_corruption_type is None:
-    #             self.corruption_types=['defocus_blur', 'glass_blur', 'motion_blur', 'zoom_blur',
-    #                 'contrast', 'elastic_transform', 'jpeg_compression', 'pixelate',
-    #                 'gaussian_noise', 'impulse_noise',  'shot_noise', 
-    #                 'brightness', 'fog', 'frost','snow',
-    #                 'gaussian_blur', 'saturate', 'spatter', 'speckle_noise']
-    #         else:
-    #             self.corruption_types=select_corruption_type
+        elif 'cifar-10-c'==dataset_name:
+            if select_corruption_type is None:
+                self.corruption_types=['defocus_blur', 'glass_blur', 'motion_blur', 'zoom_blur',
+                    'contrast', 'elastic_transform', 'jpeg_compression', 'pixelate',
+                    'gaussian_noise', 'impulse_noise',  'shot_noise', 
+                    'brightness', 'fog', 'frost','snow',
+                    'gaussian_blur', 'saturate', 'spatter', 'speckle_noise']
+                # self.corruption_types=['defocus_blur']
+            else:
+                self.corruption_types=select_corruption_type
 
-    #         if select_corruption_level is None:
-    #             self.corruption_levels=range(5)
-    #         else:
-    #             self.corruption_levels=select_corruption_level
+            if select_corruption_level is None:
+                self.corruption_levels=range(5)
+            else:
+                self.corruption_levels=select_corruption_level
 
-    #         self.dataset_dir=[]
-    #         dataset_dirs_tmp=[os.path.join(self.root_dataset_dir,'ImageNet-C-100',x) for x in self.corruption_types]
-    #         for dataset_dir_tmp in dataset_dirs_tmp:
-    #             self.dataset_dir+=[os.path.join(dataset_dir_tmp,str(x+1)) for x in self.corruption_levels]
-    #         self.mean=np.array((0.485, 0.456, 0.406),dtype=np.float32)
-    #         self.std=np.array((0.229, 0.224, 0.225),dtype=np.float32)
-    #         self.nb_classes=1000
-    #         self.input_shape=(3,224,224)
-    #         self.batch_size=256 
+            self.dataset_dir=self.root_dataset_dir
+            self.dataset_dir=[os.path.join(self.root_dataset_dir,'cifar-10-c',corruption_type+'.npy') for corruption_type in self.corruption_types]
+            self.mean=np.array((0.5,0.5,0.5),dtype=np.float32)
+            self.std=np.array((0.5,0.5,0.5),dtype=np.float32)
+            self.nb_classes=10
+            self.input_shape=(3,32,32)
+            self.batch_size=256 
 
     #       for corruption in CORRUPTIONS:
     # # Reference to original data is mutated
@@ -266,6 +265,22 @@ def load_dataset(dataset,dataset_dir,dataset_mean,dataset_std,dataset_type='val'
                                         transform=transforms.Compose([ToTensor(),
                                         transforms.Normalize(dataset_mean,dataset_std)]), 
                                         download=True)
+    elif 'cifar-10-c'==dataset:
+        base_path='/'.join(dataset_dir[0].split('/')[:-1])
+        ret_datasets=[]
+        labels=torch.LongTensor(np.load(base_path + '/labels.npy'))
+        for per_dataset_dir in dataset_dir:
+            datas=np.load(per_dataset_dir)
+            datas=np.split(datas,5)
+            for i in range(5):
+                ret_dataset = datasets.CIFAR10(base_path.replace('cifar-10-c','cifar-10'), 
+                                            train=False, transform=transforms.Compose([ToTensor(),
+                                            transforms.Normalize(dataset_mean,dataset_std)]), 
+                                            download=False)
+                ret_dataset.data = datas[i]
+                ret_dataset.targets = labels
+                ret_datasets.append(ret_dataset)
+
     elif 'imagenet'==dataset:
         ret_datasets = datasets.ImageFolder(os.path.join(dataset_dir,dataset_type),
                                             transforms.Compose([
@@ -360,6 +375,7 @@ def img2dct(clean_imgs):
         for j in range(c):
             ch_block_cln=clean_imgs[i,:,:,j]                   
             block_cln_tmp = np.log(1+np.abs(dct2(ch_block_cln)))
+            # block_cln_tmp = np.log(1+(dct2(ch_block_cln))**2)
             block_dct[i,:,:,j]=block_cln_tmp
     block_dct=block_dct.transpose(0,3,1,2)
     return block_dct
